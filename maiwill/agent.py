@@ -8,6 +8,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+from .decision import validate_decision
 from .storage import Storage
 
 DecisionProvider = Callable[
@@ -91,15 +92,19 @@ class AgentLoop:
                         if isinstance(request_id, str):
                             await asyncio.to_thread(self.storage.record_invalid_decision, request_id)
                     invalid_decisions += 1
+                    error = str(exc).rstrip("。.!！")
                     feedback = (
-                        f"上一次决策格式无效：{exc}。请从 available_capabilities 中选择完全匹配的能力名，"
-                        "并按要求重新输出一个有效 JSON 决策；不要重复无效字段。"
+                        f"上一次决策格式无效：{error}。"
+                        "请按 decision_schema 修正后只输出一个完整 JSON 决策对象；"
+                        "本次无效决策未执行，待处理消息仍保留在队列中。"
                     )
+                    observation = {"role": "observation", "note": feedback}
+                    diagnostics = decision.get("_format_diagnostics") if isinstance(decision, dict) else None
                     await asyncio.to_thread(
                         self.storage.append_conversation,
-                        {"role": "observation", "note": feedback},
+                        {**observation, "diagnostics": diagnostics} if isinstance(diagnostics, dict) else observation,
                     )
-                    context["messages"].append({"role": "observation", "note": feedback})
+                    context["messages"].append(observation)
                     await asyncio.to_thread(self.storage.save_session_context, context)
                     if invalid_decisions >= 3:
                         await asyncio.to_thread(
@@ -271,30 +276,12 @@ class AgentLoop:
 
     @staticmethod
     def _validate_decision(decision: Any) -> None:
-        if not isinstance(decision, dict):
-            raise ValueError("意志决策必须是对象")
-        if decision.get("_format_error"):
+        if isinstance(decision, dict) and decision.get("_format_error"):
             raise ValueError(str(decision["_format_error"])[:500])
-        kind = decision.get("decision")
-        if kind == "rest":
-            if type(decision.get("duration_seconds")) is not int or decision["duration_seconds"] <= 0:
-                raise ValueError("rest.duration_seconds 必须是正整数")
-        elif kind == "finish":
-            pass
-        elif kind == "use_capability":
-            capability = decision.get("capability")
-            if not isinstance(capability, str) or not capability.strip() or len(capability) > 128:
-                raise ValueError("能力名必须是 1 到 128 个字符")
-            if not isinstance(decision.get("arguments"), dict):
-                raise ValueError("能力 arguments 必须是对象")
-        else:
-            raise ValueError(f"未知意志决策：{kind}")
-        reason = decision.get("reason", "")
-        if not isinstance(reason, str) or len(reason) > 1000:
-            raise ValueError("reason 必须是最多 1000 个字符的字符串")
-        reply = decision.get("reply", "")
-        if not isinstance(reply, str) or len(reply) > 4000:
-            raise ValueError("reply 必须是最多 4000 个字符的字符串")
+        validate_decision(
+            {key: value for key, value in decision.items() if key != "_usage_request_id"}
+            if isinstance(decision, dict) else decision
+        )
 
     @staticmethod
     def _event_for_context(event: dict[str, Any]) -> dict[str, Any]:

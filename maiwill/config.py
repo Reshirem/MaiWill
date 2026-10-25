@@ -16,7 +16,7 @@ class PluginSectionConfig(PluginConfigBase):
     __ui_order__ = -1
 
     enabled: bool = Field(default=True, description="是否启用 MaiWill。关闭后不会运行意志监督任务，但会保留已保存的会话和体力账本。", json_schema_extra={"label": "启用 MaiWill", "hint": "关闭插件不会删除会话、事件或体力数据。", "order": 0})
-    config_version: str = Field(default="0.1.21", description="插件配置结构的内部版本号。", json_schema_extra={"label": "配置版本（内部）", "hidden": True, "disabled": True, "order": 99})
+    config_version: str = Field(default="0.1.35", description="插件配置结构的内部版本号。", json_schema_extra={"label": "配置版本（内部）", "hidden": True, "disabled": True, "order": 99})
 
 
 class GeneralConfig(PluginConfigBase):
@@ -54,11 +54,19 @@ class GeneralConfig(PluginConfigBase):
     idle_wait_seconds: int = Field(default=3600, ge=60, le=43200, description="无停止请求时模型错误地结束本轮后，代码安排的自主恢复等待时长。", json_schema_extra={"label": "自主恢复等待（秒）", "hint": "正常情况下麦麦会用 rest 自己选择休息时长；只有无停止请求时错误地选择 finish，代码才按此等待后继续探索。无效决策三次纠正失败会按断连退避重试。默认 3600 秒（1 小时）。"})
     context_limit_tokens: int = Field(default=258000, ge=1024, le=2000000, description="MaiWill 整理意志会话历史时使用的上下文 token 目标上限。", json_schema_extra={"label": "上下文管理上限（token）", "hint": "默认 258,000。达到下方阈值后裁剪较早历史，并目标保留约此值一半的近期记录；这是 MaiWill 的软管理目标，不会覆盖模型供应商的上下文设置。"})
     context_compression_threshold: float = Field(default=0.8, gt=0, le=1, description="完整请求预估或宿主报告的 prompt 用量达到上下文管理上限的此比例时，整理较早会话历史。", json_schema_extra={"label": "上下文压缩阈值", "hint": "默认 0.8（80%）。例如上限 258,000 时，预估或实测达到约 206,400 token 开始整理，然后目标保留最近约 129,000 token 的完整历史。"})
+    memory_bridge_enabled: bool = Field(default=False, description="启用个人用途的本机 MaiBot WebUI 记忆读写桥接。插件从 MAIBOT_INSTANCE_DIR 实例的 data/webui.json 读取 WebUI Token；此凭据具有 WebUI 管理员权限。", json_schema_extra={"label": "启用本机记忆桥接", "hint": "默认关闭。开启等于授予 MaiWill WebUI 管理员权限，只建议个人单机部署。开启后可检索/读取 MaiWill 自己写入的共享记忆，并将已整理候选写入 A_Memorix。凭据只用于本机回环请求，不保存到插件配置或数据库。"})
+    memory_webui_url: str = Field(default="http://127.0.0.1:8001", description="本机 MaiBot WebUI 地址；只允许 localhost 或回环 IP。", json_schema_extra={"label": "本机 WebUI 地址", "hint": "默认 http://127.0.0.1:8001。桥接会拒绝远程地址，避免把管理员 Token 发往网络上的其他主机。"})
 
     @field_validator("model_name")
     @classmethod
     def normalize_model_name(cls, value: str) -> str:
         return value.strip()
+
+    @field_validator("memory_webui_url")
+    @classmethod
+    def validate_memory_webui_url(cls, value: str) -> str:
+        from .memory_bridge import validate_loopback_url
+        return validate_loopback_url(value)
 
     @model_validator(mode="after")
     def validate_reconnect_window(self) -> "GeneralConfig":

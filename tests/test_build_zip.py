@@ -87,6 +87,18 @@ class BuildZipTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_zip(self.project)
 
+    def test_action_confirmation_over_80_characters_is_rejected(self) -> None:
+        declaration = {
+            "schema_version": 2,
+            "pages": [{
+                "mode": "declarative", "id": "records",
+                "actions": {"sync_candidate": {"confirmation": "x" * 81}},
+            }],
+        }
+        (self.project / "webui.json").write_text(json.dumps(declaration), encoding="utf-8")
+        with self.assertRaisesRegex(ValueError, "confirmation exceeds 80 characters"):
+            build_zip(self.project)
+
     def test_archive_imports_as_the_hosts_synthetic_plugin_package(self) -> None:
         archive_path = build_zip(self.project)
         with ZipFile(archive_path) as archive:

@@ -151,6 +151,13 @@
             "record_id": {"type": "string", "required": true, "max_length": 200},
             "revision": {"type": "string", "max_length": 64}
           }
+        },
+        "sync_candidate": {
+          "api": "will_sync_candidate", "version": "1",
+          "parameters": {
+            "external_id": {"type": "string", "required": true, "max_length": 100}
+          },
+          "confirmation": "确认将已整理的候选原文写入 MaiBot 全局共享记忆吗？之后可在记忆管理中查看或删除。"
         }
       }
     }

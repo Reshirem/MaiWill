@@ -3,6 +3,7 @@ from __future__ import annotations
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from maiwill.phone import AdbPhone, normalize_device_address
 
@@ -35,21 +36,29 @@ class PhoneAdapterTest(unittest.IsolatedAsyncioTestCase):
 
         async def fake_run(*args, **kwargs):
             calls.append((args, kwargs))
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
             return b""
 
         self.phone._run = fake_run  # type: ignore[method-assign]
 
-        result = await self.phone.use({"action": "back"})
+        async def no_wait(_seconds):
+            return None
+
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            result = await self.phone.use({"action": "back", "settle_ms": 0})
         self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "screenshot")
         self.assertEqual(calls[0][0], ("connect", "127.0.0.1:16384"))
         self.assertFalse(calls[0][1]["select_device"])
         self.assertEqual(calls[1][0], ("shell", "input keyevent 4"))
         self.assertEqual(calls[1][1], {"timeout": None})
+        self.assertEqual(calls[2][0], ("exec-out", "screencap", "-p"))
 
         rejected = await self.phone.use({"action": "adb", "arguments": ["shell", "-s", "other-device"]})
         self.assertFalse(rejected["success"])
         self.assertIn("不能修改配置设备", rejected["error"])
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 3)
 
         host_command = await self.phone.use({"action": "adb", "arguments": ["devices"]})
         self.assertFalse(host_command["success"])
@@ -58,11 +67,23 @@ class PhoneAdapterTest(unittest.IsolatedAsyncioTestCase):
         )
         host_file = await self.phone.use({"action": "adb", "arguments": ["pull", "/sdcard/file", "C:\\temp\\file"]})
         self.assertFalse(transport_override["success"])
-        self.assertFalse(host_file["success"])
-        self.assertEqual(len(calls), 2)
+        self.assertTrue(host_file["success"])
+        self.assertEqual(len(calls), 5)
+
+        for command, args in (("pull", ["/sdcard/Download/report.txt", "C:\\Temp\\report.txt"]),
+                              ("push", ["C:\\Temp\\input.txt", "/sdcard/Download/input.txt"])):
+            with self.subTest(command=command):
+                result = await self.phone.use({"action": "adb", "arguments": [command, *args]})
+                self.assertTrue(result["success"])
+        file_transfers = [call for call in calls if call[0][0] in {"pull", "push"}]
+        file_transfers = file_transfers[1:]
+        self.assertEqual(file_transfers[0][0], ("pull", "/sdcard/Download/report.txt", "C:\\Temp\\report.txt"))
+        self.assertEqual(file_transfers[0][1]["timeout"], 60)
+        self.assertEqual(file_transfers[1][0], ("push", "C:\\Temp\\input.txt", "/sdcard/Download/input.txt"))
+        self.assertEqual(file_transfers[1][1]["timeout"], 60)
         invalid_text = await self.phone.use({"action": "type", "text": "你好"})
         self.assertFalse(invalid_text["success"])
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 9)
 
     async def test_invalid_coordinates_and_unknown_actions_never_reach_adb(self) -> None:
         calls = []
@@ -95,6 +116,202 @@ class PhoneAdapterTest(unittest.IsolatedAsyncioTestCase):
         image_path = self.root / result["path"]
         self.assertTrue(image_path.is_file())
         self.assertEqual(image_path.read_bytes(), b"\x89PNG\r\n\x1a\nmock image")
+
+    async def test_drag_runs_and_automatically_returns_post_action_screenshot(self) -> None:
+        calls = []
+
+        async def fake_run(*args, **kwargs):
+            calls.append((args, kwargs))
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            calls.append((("shell", command), {"timeout": timeout}))
+            return ""
+
+        async def no_wait(_seconds):
+            return None
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            result = await self.phone.use({
+                "action": "drag", "x1": 100, "y1": 200, "x2": 500, "y2": 450,
+                "settle_ms": 0,
+            })
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "screenshot")
+        self.assertEqual(result["action"], "drag")
+        self.assertEqual(calls[0][0], ("connect", "127.0.0.1:16384"))
+        self.assertEqual(calls[1][0], ("shell", "input swipe 100 200 500 450 500"))
+        self.assertEqual(calls[2][0], ("exec-out", "screencap", "-p"))
+        self.assertTrue((self.root / result["path"]).is_file())
+
+    async def test_instant_drag_injects_down_move_up_without_intermediate_path(self) -> None:
+        calls = []
+
+        async def fake_run(*args, **kwargs):
+            calls.append((args, kwargs))
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            calls.append((("shell", command), {"timeout": timeout}))
+            return ""
+
+        async def no_wait(_seconds):
+            return None
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            result = await self.phone.use({
+                "action": "instant_drag", "x1": 120, "y1": 640,
+                "x2": 1100, "y2": 95, "settle_ms": 0,
+            })
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "screenshot")
+        self.assertEqual(result["action"], "instant_drag")
+        self.assertEqual(calls[1][0], (
+            "shell",
+            "input motionevent DOWN 120 640; down_status=$?; "
+            "input motionevent MOVE 1100 95; move_status=$?; "
+            "input motionevent UP 1100 95; up_status=$?; "
+            "test $down_status -eq 0 && test $move_status -eq 0 && test $up_status -eq 0",
+        ))
+        self.assertEqual(calls[2][0], ("exec-out", "screencap", "-p"))
+
+    async def test_instant_drag_attempts_release_even_if_move_event_fails(self) -> None:
+        commands = []
+
+        async def fake_run(*args, **kwargs):
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            commands.append(command)
+            return ""
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        result = await self.phone.use({
+            "action": "instant_drag", "x1": 10, "y1": 20, "x2": 30, "y2": 40,
+        })
+        self.assertTrue(result["success"])
+        self.assertIn("input motionevent UP 30 40", commands[0])
+
+    async def test_scroll_uses_screen_dimensions_and_invalid_gestures_are_rejected(self) -> None:
+        commands = []
+
+        async def fake_run(*args, **kwargs):
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            commands.append(command)
+            if command == "dumpsys input":
+                return "Viewport INTERNAL: displayId=0 logicalFrame=[0, 0, 1080, 2400] physicalFrame=[0,0,1080,2400]\n"
+            return ""
+
+        async def no_wait(_seconds):
+            return None
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            result = await self.phone.use({"action": "scroll", "direction": "up", "distance_px": 800, "settle_ms": 0})
+            invalid = await self.phone.use({"action": "scroll", "direction": "diagonal"})
+        self.assertEqual(commands[:2], ["dumpsys input", "input swipe 540 1600 540 800 450"])
+        self.assertEqual(result["status"], "screenshot")
+        self.assertFalse(invalid["success"])
+        self.assertIn("direction", invalid["error"])
+        tiny_delta = await self.phone.use({"action": "scroll", "direction": "up", "distance_px": 1, "settle_ms": 0})
+        self.assertTrue(tiny_delta["success"])
+        self.assertEqual(commands[-2], "dumpsys input")
+        self.assertEqual(commands[-1], "input swipe 540 1201 540 1199 450")
+
+    async def test_scroll_uses_rotated_logical_input_dimensions_for_landscape_games(self) -> None:
+        commands = []
+
+        async def fake_run(*args, **kwargs):
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            commands.append(command)
+            if command == "dumpsys input":
+                return "Viewport INTERNAL: displayId=0 logicalFrame=[0, 0, 1280, 720] physicalFrame=[0,0,1280,720]\n"
+            return ""
+
+        async def no_wait(_seconds):
+            return None
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            result = await self.phone.use({"action": "scroll", "direction": "right", "distance_px": 800, "settle_ms": 0})
+        self.assertTrue(result["success"])
+        self.assertEqual(commands[:2], ["dumpsys input", "input swipe 240 360 1040 360 450"])
+
+    async def test_long_press_double_tap_and_wait_use_expected_input_events(self) -> None:
+        commands = []
+
+        async def fake_run(*args, **kwargs):
+            if args == ("exec-out", "screencap", "-p"):
+                return b"\x89PNG\r\n\x1a\nmock image"
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            commands.append(command)
+            return ""
+
+        async def no_wait(_seconds):
+            return None
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            long_press = await self.phone.use({"action": "long_press", "x": 42, "y": 84, "duration_ms": 1200, "settle_ms": 0})
+            double_tap = await self.phone.use({"action": "double_tap", "x": 25, "y": 35, "settle_ms": 0})
+            wait = await self.phone.use({"action": "wait", "wait_ms": 1500})
+
+        self.assertEqual(commands, [
+            "input swipe 42 84 42 84 1200",
+            "input tap 25 35", "input tap 25 35",
+        ])
+        self.assertTrue(all(item["status"] == "screenshot" for item in (long_press, double_tap, wait)))
+        self.assertEqual(wait["action"], "wait")
+
+    async def test_gesture_screenshot_failure_says_action_completed_and_does_not_retry_it(self) -> None:
+        commands = []
+
+        async def fake_run(*args, **kwargs):
+            commands.append(args)
+            if args == ("exec-out", "screencap", "-p"):
+                raise RuntimeError("device offline")
+            return b""
+
+        async def fake_shell(command, *, timeout=None):
+            commands.append(("shell", command))
+            return ""
+
+        async def no_wait(_seconds):
+            return None
+
+        self.phone._run = fake_run  # type: ignore[method-assign]
+        self.phone._shell = fake_shell  # type: ignore[method-assign]
+        with patch("maiwill.phone.asyncio.sleep", no_wait):
+            result = await self.phone.use({"action": "tap", "x": 10, "y": 20, "settle_ms": 0})
+        self.assertTrue(result["success"])
+        self.assertEqual(result["status"], "completed")
+        self.assertIn("observation_error", result)
+        self.assertEqual(commands.count(("shell", "input tap 10 20")), 1)
 
     async def test_screen_reads_and_limits_untrusted_ui_automator_nodes(self) -> None:
         xml = (

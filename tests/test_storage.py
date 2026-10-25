@@ -186,6 +186,53 @@ class StorageTest(unittest.TestCase):
                 confidence=2,
             )
 
+    def test_learning_candidate_memory_sync_has_claim_retry_and_completion_states(self) -> None:
+        candidate = self.storage.create_learning_candidate(
+            "mai_will.knowledge", "标题", "固定正文", [],
+            origin_session_id="session-1", now=1000,
+        )
+        external_id = candidate["external_id"]
+        with self.assertRaisesRegex(ValueError, "resolved"):
+            self.storage.begin_learning_candidate_sync(external_id)
+        self.storage.update_learning_candidate_status(external_id, "resolved", now=1001)
+
+        claimed = self.storage.begin_learning_candidate_sync(external_id)
+        self.assertEqual(claimed["memory_sync_status"], "syncing")
+        self.assertEqual(claimed["memory_sync_attempts"], 1)
+        with self.assertRaisesRegex(ValueError, "正在同步"):
+            self.storage.begin_learning_candidate_sync(external_id)
+        self.assertTrue(self.storage.set_learning_candidate_sync_task(external_id, "task-123"))
+        self.assertEqual(self.storage.get_learning_candidate(external_id)["memory_sync_task_id"], "task-123")
+        self.assertTrue(self.storage.fail_learning_candidate_sync(external_id, "temporary failure", now=1002))
+        self.assertEqual(self.storage.get_learning_candidate(external_id)["memory_sync_task_id"], "task-123")
+
+        retried = self.storage.begin_learning_candidate_sync(external_id)
+        self.assertEqual(retried["memory_sync_status"], "syncing")
+        self.assertEqual(retried["memory_sync_attempts"], 2)
+        memory_id = "a" * 64
+        self.assertTrue(self.storage.complete_learning_candidate_sync(external_id, memory_id, now=1003))
+        completed = self.storage.get_learning_candidate(external_id)
+        self.assertEqual(completed["memory_sync_status"], "synced")
+        self.assertEqual(completed["memory_id"], memory_id)
+        self.assertEqual(completed["memory_synced_at"], 1003)
+        self.assertEqual(self.storage.query_learning_candidates(status="resolved")["candidates"][0]["memory_sync_status"], "synced")
+        self.assertFalse(self.storage.delete_learning_candidate(external_id))
+        with self.assertRaisesRegex(ValueError, "格式无效"):
+            self.storage.complete_learning_candidate_sync(external_id, "not-a-memory-id")
+        with self.assertRaisesRegex(ValueError, "已同步"):
+            self.storage.update_learning_candidate_status(external_id, "deferred")
+
+    def test_stale_syncing_candidate_can_be_recovered_and_retried(self) -> None:
+        candidate = self.storage.create_learning_candidate(
+            "mai_will.knowledge", "标题", "固定正文", [], origin_session_id="session-1", now=1000,
+        )
+        external_id = candidate["external_id"]
+        self.storage.update_learning_candidate_status(external_id, "resolved", now=1001)
+        self.storage.begin_learning_candidate_sync(external_id, now=1002)
+        recovered = self.storage.begin_learning_candidate_sync(external_id, now=1303)
+        self.assertEqual(recovered["memory_sync_status"], "syncing")
+        self.assertEqual(recovered["memory_sync_attempts"], 2)
+
     def test_exploration_goal_uses_durable_evidence_tracks_progress_and_cools_down_repeats(self) -> None:
         interest = self.storage.record_interest(
             "海洋潮汐", "我想弄清潮汐和月相关系", "curiosity", [],
@@ -379,6 +426,82 @@ class StorageTest(unittest.TestCase):
         self.assertEqual(repeated["action_id"], first["action_id"])
         self.storage.initialize_session(enabled=True, now=1100)
         self.assertEqual(self.storage.get_status_snapshot(now=1100)["recent_actions"][0]["status"], "outcome_unknown")
+
+    def test_successful_phone_gesture_with_post_action_screenshot_is_progress_evidence(self) -> None:
+        interest = self.storage.record_interest(
+            "移動遊戲教學", "完成畫面上的拖動教學", "curiosity", [],
+            source_stream_id="stream-1", external_id="interest-phone-drag", now=1001,
+        )
+        goal = self.storage.create_exploration_goal(
+            "移動遊戲教學", "移動遊戲", "完成畫面上的拖動教學",
+            "interest", interest["external_id"], "觀察到拖動提示", now=1002,
+        )
+        action = self.storage.start_action(
+            "drag-step", "phone.use",
+            {"action": "drag", "x1": 100, "y1": 200, "x2": 500, "y2": 450}, now=1003,
+        )
+        self.storage.finish_action(
+            "drag-step", "completed",
+            {"success": True, "status": "screenshot", "action": "drag", "path": "phone/screenshots/example.png"},
+            now=1004,
+        )
+        successful_actions = self.storage.get_recent_successful_actions(now=1005)
+        self.assertEqual(successful_actions[0]["action_id"], action["action_id"])
+        progress = self.storage.update_exploration_goal(
+            goal["goal_id"],
+            "progress", "拖动后确认棋子移动到新位置", next_step="按提示继续",
+            evidence_type="action", evidence_ref=action["action_id"], now=1006,
+        )
+        self.assertEqual(progress["progress_summary"], "拖动后确认棋子移动到新位置")
+
+    def test_gesture_without_post_action_screenshot_is_not_progress_evidence(self) -> None:
+        interest = self.storage.record_interest(
+            "拖动体验", "检查拖动反馈", "curiosity", [],
+            source_stream_id="stream-1", external_id="interest-phone-drag-unobserved", now=1000,
+        )
+        goal = self.storage.create_exploration_goal(
+            "拖动反馈", "拖动反馈", "核实界面是否响应拖动",
+            "interest", interest["external_id"], "记录了兴趣", now=1000,
+        )
+        action = self.storage.start_action(
+            "drag-unobserved", "phone.use",
+            {"action": "drag", "x1": 1, "y1": 2, "x2": 3, "y2": 4}, now=1001,
+        )
+        self.storage.finish_action(
+            "drag-unobserved", "completed",
+            {"success": True, "status": "completed", "observation_error": "offline"}, now=1002,
+        )
+        self.assertEqual(self.storage.get_recent_successful_actions(now=1003), [])
+        with self.assertRaisesRegex(ValueError, "证据引用不存在"):
+            self.storage.update_exploration_goal(
+                goal["goal_id"], "progress", "尚未看见拖动是否生效",
+                next_step="重新截图确认", evidence_type="action",
+                evidence_ref=action["action_id"], now=1003,
+            )
+
+    def test_failed_post_action_observation_is_not_progress_evidence(self) -> None:
+        interest = self.storage.record_interest(
+            "界面点击", "确认点击结果", "curiosity", [],
+            source_stream_id="stream-1", external_id="interest-phone-tap", now=1000,
+        )
+        goal = self.storage.create_exploration_goal(
+            "确认界面点击", "界面点击", "检查点击后的实际结果",
+            "interest", interest["external_id"], "记录了该兴趣", now=1000,
+        )
+        action = self.storage.start_action(
+            "tap-unobserved", "phone.use", {"action": "tap", "x": 10, "y": 20}, now=1001,
+        )
+        self.storage.finish_action(
+            "tap-unobserved", "completed",
+            {"success": True, "status": "completed", "observation_error": "offline"}, now=1002,
+        )
+        self.assertEqual(self.storage.get_recent_successful_actions(now=1003), [])
+        with self.assertRaisesRegex(ValueError, "证据引用不存在"):
+            self.storage.update_exploration_goal(
+                goal["goal_id"], "progress", "无法确认操作是否成功",
+                next_step="先截图确认", evidence_type="action",
+                evidence_ref=action["action_id"], now=1003,
+            )
 
     def test_action_step_replay_rejects_different_capability_or_arguments(self) -> None:
         self.storage.start_action("step-1", "phone.use", {"action": "observe"}, now=1000)

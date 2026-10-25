@@ -39,6 +39,15 @@ def collect_package_files(project_root: Path = PROJECT_ROOT) -> tuple[str, list[
     if not isinstance(version, str) or not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise ValueError("_manifest.json must declare a three-part numeric version")
 
+    webui = json.loads((project_root / "webui.json").read_text(encoding="utf-8"))
+    for page in webui.get("pages", []):
+        for action_name, action in page.get("actions", {}).items():
+            confirmation = action.get("confirmation")
+            if confirmation is not None and len(confirmation) > 80:
+                raise ValueError(
+                    f"WebUI action confirmation exceeds 80 characters: {page.get('id')}.{action_name}"
+                )
+
     package_files = sorted(
         path.relative_to(project_root)
         for path in (project_root / PACKAGE_ROOT).rglob("*.py")
@@ -58,7 +67,6 @@ def collect_package_files(project_root: Path = PROJECT_ROOT) -> tuple[str, list[
     members.append((project_root / Path("config.toml"), "config.toml"))
     members.append((project_root / FIXED_FILES[3], "README.md"))
     members.extend((project_root / path, path.as_posix()) for path in package_files)
-    webui = json.loads((project_root / "webui.json").read_text(encoding="utf-8"))
     for entry in sorted({page["entry"] for page in webui.get("pages", []) if page.get("mode") == "custom"}):
         relative = Path(entry)
         source = project_root / relative

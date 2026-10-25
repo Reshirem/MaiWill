@@ -43,10 +43,10 @@ def build_exploration_options(
     recent_phone_observation = any(
         action.get("capability") == "phone.use"
         and (
-            action.get("action_kind") in {"status", "screen", "screenshot"}
+            action.get("action_kind") in {"status", "screen", "screenshot", "wait"}
             or (
                 isinstance(action.get("arguments"), dict)
-                and action["arguments"].get("action") in {"status", "screen", "screenshot"}
+                and action["arguments"].get("action") in {"status", "screen", "screenshot", "wait"}
             )
         )
         for action in recent_actions
@@ -58,11 +58,11 @@ def build_exploration_options(
             "available_capabilities": ["phone.use"],
             "next_step": (
                 "没有活动目标或预先给定的来源，不代表无事可做。查看专属设备当前可见内容；"
-                + ("近期观察仍可作为线索，从真实可见的页面继续一个只读或可恢复的浏览步骤。" if recent_phone_observation else "可从 status、screen 或 screenshot 安全观察开始。")
-                + "从真实可见内容里自己挑一个有趣、具体的小问题，用一两步只读或可恢复操作了解更多；"
+                + ("近期观察仍可作为线索，继续完成真实可见页面上的操作。" if recent_phone_observation else "可从 status、screen 或 screenshot 了解设备当前状态。")
+                + "从真实可见内容里自己挑一个有趣、具体的小问题，按需要点击、长按、双击、滚动、平滑拖拽或瞬移拖拽、输入、启动应用或使用设备内 shell/ADB 解决；观察自动返回操作后截图，根据画面调整，不要重复无效手势。"
                 "单步发现无需先建目标，只有值得持续调查时才引用成功行动创建目标。"
-                "只浏览，不发送消息、不提交表单、不购买、不删除、不改设置、不运行 shell/ADB 命令，"
-                "也不读取或暴露私人凭据。完成一步后重新判断是否值得继续，避免重复旧观察；"
+                "固定操作配置设备，不改选设备或控制 ADB 主机；不付款、不购买、不删除重要数据、不修改账号安全设置、"
+                "不发布或向他人发送内容，也不读取或暴露私人凭据，除非用户明确要求。完成一步后重新判断是否值得继续，避免重复旧观察；"
                 "没有具体、安全方向或体力需要恢复时再休息，不要为了保持忙碌而编造任务。"
             ),
         })
@@ -101,7 +101,7 @@ def build_exploration_options(
         options.append({
             "kind": "discover_configured_phone",
             "title": "观察已配置的专属手机，寻找真实可推进的主题",
-            "next_step": "从 phone.use(action=status) 或 phone.use(action=screen) 只读观察开始；不要为制造任务而点击、输入或运行 shell。若观察到值得继续的主题，用成功观察的 action_id 建立目标。",
+            "next_step": "从 status、screen 或 screenshot 了解设备当前情况；根据可见内容选择合适操作，必要时可点击、长按、双击、滚动、平滑拖拽或瞬移拖拽、等待、输入、启动应用或使用设备内 shell/ADB。常规操作自动返回新截图，根据结果调整而不要盲目重复。若观察到值得继续的主题，用成功行动的 action_id 建立目标。",
         })
 
     if recent_actions:

@@ -194,8 +194,13 @@ def export_markdown(data_dir: Path, kind: str, entry: dict[str, Any]) -> dict[st
     if kind == "diary":
         header += f"记录时间：{entry['recorded_at']}\n"
     else:
-        header += (f"状态：{entry['status']}（仅本地处理状态，尚未同步到共享记忆）\n"
+        sync_status = entry.get("memory_sync_status", "not_synced")
+        sync_labels = {"not_synced": "未同步", "syncing": "同步中", "synced": "已同步", "failed": "同步失败"}
+        header += (f"状态：{entry['status']}（本地整理状态）\n"
+                   f"共享记忆：{sync_labels.get(sync_status, '未知')}\n"
                    f"来源引用：{entry['source_ref']}\n标签：{', '.join(entry['tags'])}\n")
+        if entry.get("memory_id"):
+            header += f"MaiBot 记忆 ID：{entry['memory_id']}\n"
     document = (header + "\n" + entry["content"] + "\n").encode("utf-8")
     if len(document) > MAX_DOCUMENT_BYTES:
         raise ValueError("导出内容超过 128 KiB")

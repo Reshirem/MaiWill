@@ -41,6 +41,7 @@
   #meta { color:var(--muted); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; margin:9px 0 14px; }
   #body { width:100%; flex:1; min-height:140px; resize:vertical; padding:16px; border:1px solid var(--line); border-radius:8px; background:var(--bg); line-height:1.85; }
   .buttons { margin-top:14px; }
+  .buttons .spacer { flex:1; }
   .hint,#export-result { font-size:12px; color:var(--muted); margin:8px 0 0; overflow-wrap:anywhere; white-space:pre-wrap; }
   #export-result { color:var(--accent); }
   #list-note { margin:0; padding:0 17px 9px; color:var(--muted); font-size:12px; }
@@ -59,7 +60,7 @@
 <main class="app">
   <header>
     <div class="heading"><h1>日记与成果</h1><button id="conversation">回到意识会话</button></div>
-    <p class="subtitle">把探索留下的记录找回来，读一读，再继续。</p>
+    <p class="subtitle">把探索留下的记录找回来，读一读，再继续；已整理的成果可手动写入共享记忆。</p>
     <div class="tabs" aria-label="资料类型">
       <button id="diary" aria-pressed="true" disabled>日记</button>
       <button id="reflection" aria-pressed="false" disabled>学习成果</button>
@@ -86,7 +87,7 @@
       <article id="details" hidden>
         <h2 id="title"></h2><p id="meta"></p>
         <textarea id="body" readonly aria-label="完整正文" spellcheck="false"></textarea>
-        <div class="buttons"><button id="select" disabled>全选正文</button><button id="export" disabled>导出 Markdown</button></div>
+        <div class="buttons"><button id="select" disabled>全选正文</button><button id="export" disabled>导出 Markdown</button><span class="spacer"></span><button id="sync" class="primary" hidden disabled>写入共享记忆</button></div>
         <p class="hint">导出文件保存在运行 MaiBot 的设备上。日期按该设备的本地日期筛选。</p>
         <p id="export-result" role="status" aria-live="polite"></p>
       </article>
@@ -98,8 +99,9 @@
   'use strict';
   const el = id => document.getElementById(id);
   const statuses = {pending:'待处理',researching:'研究中',resolved:'已整理',deferred:'暂缓',dismissed:'已略过'};
+  const syncStatuses = {not_synced:'未同步',syncing:'同步中',synced:'已同步',failed:'同步失败'};
   const sources = {'mai_will.knowledge':'知识','mai_will.experience':'经历','mai_will.expression':'表达观察','mai_will.phone':'手机见闻','mai_will.diary':'日记'};
-  let ready = false, busy = false, kind = 'diary', filters = {}, cursor = '', nextCursor = '', stack = [], selected = null;
+  let ready = false, busy = false, kind = 'diary', filters = {}, cursor = '', nextCursor = '', stack = [], selected = null, memoryBridgeEnabled = false;
   const stamp = value => new Date(value * 1000).toLocaleString('zh-CN', {hour12:false});
   const recordId = item => item.entry_id || item.external_id;
   function error(error) { el('error').textContent = String(error.message || error); el('error').hidden = false; }
@@ -109,11 +111,13 @@
     el('previous').disabled = !ready || busy || !stack.length;
     el('next').disabled = !ready || busy || !nextCursor;
     el('select').disabled = el('export').disabled = busy || !selected;
+    const staleSync = selected && selected.memory_sync_status === 'syncing' && Date.now() / 1000 - Number(selected.updated_at || 0) > 300;
+    el('sync').disabled = busy || !memoryBridgeEnabled || !selected || kind !== 'reflection' || selected.status !== 'resolved' || selected.memory_sync_status === 'synced' || (selected.memory_sync_status === 'syncing' && !staleSync);
   }
   function clearDetail() {
     selected = null; el('details').hidden = true; el('reader-empty').hidden = false;
     el('reader-empty').textContent = '选择一条记录，查看完整内容。';
-    el('body').value = ''; el('export-result').textContent = '';
+    el('body').value = ''; el('export-result').textContent = ''; el('sync').hidden = true;
   }
   function readFilters() { return {query:el('query').value, status:kind === 'reflection' ? el('status').value : '', date_from:el('from').value, date_to:el('to').value}; }
   async function load(targetCursor = '', targetStack = [], targetFilters = readFilters()) {
@@ -123,12 +127,13 @@
     try {
       const result = await window.maibot.query('records', {kind, ...targetFilters, cursor:targetCursor, limit:10});
       if (!result.success) throw Error(result.error || '读取资料失败');
+      memoryBridgeEnabled = Boolean(result.memory_bridge_enabled);
       cursor = targetCursor; stack = targetStack; filters = targetFilters; nextCursor = result.next_cursor || '';
       const items = result.entries || result.candidates || [];
       const nodes = items.map(item => {
         const button = document.createElement('button'); button.className = 'entry'; button.dataset.id = recordId(item);
         const title = document.createElement('strong'); title.textContent = item.title;
-        const meta = document.createElement('small'); meta.textContent = kind === 'diary' ? item.date : `${stamp(item.created_at)} · ${statuses[item.status] || item.status}`;
+        const meta = document.createElement('small'); meta.textContent = kind === 'diary' ? item.date : `${stamp(item.created_at)} · ${statuses[item.status] || item.status} · ${syncStatuses[item.memory_sync_status] || '未同步'}`;
         const preview = document.createElement('span'); preview.textContent = item.content_preview;
         button.append(title, meta, preview); button.addEventListener('click', () => open(item)); return button;
       });
@@ -136,7 +141,8 @@
       el('entries').replaceChildren(...nodes); el('entries').scrollTop = 0;
       el('list-title').textContent = `${kind === 'diary' ? '日记' : '学习成果'} · 本页 ${items.length} 条`;
       el('page').textContent = `第 ${stack.length + 1} 页`;
-      el('list-note').textContent = result.skipped_count ? `本次查询跳过 ${result.skipped_count} 个无法安全读取或格式无效的文件。` : kind === 'reflection' ? '已整理表示本地整理完成，尚未同步到共享记忆。' : '';
+      el('list-note').textContent = result.skipped_count ? `本次查询跳过 ${result.skipped_count} 个无法安全读取或格式无效的文件。` : kind === 'reflection' ? '同步仅写入 MaiWill 来源的全局共享记忆；日记保存在本地，不会自动写入。' : '';
+      return result;
     } catch (e) { error(e); nextCursor = ''; el('entries').replaceChildren(); el('list-title').textContent = '读取失败，请重试筛选或刷新。'; }
     finally { busy = false; controls(); }
   }
@@ -160,9 +166,10 @@
       } while (true);
       // Python 的字符偏移以 Unicode code point 计数，正文拼接不依赖 JS 的 UTF-16 length。
       selected = {...item, revision:first.revision}; el('title').textContent = first.title; el('body').value = content;
+      el('sync').hidden = !memoryBridgeEnabled || kind !== 'reflection' || first.status !== 'resolved' || first.memory_sync_status === 'synced';
       el('meta').textContent = kind === 'diary'
         ? `日记 · ${first.recorded_at}\n记录标识：${first.entry_id}`
-        : `${sources[first.source_type] || first.source_type} · ${statuses[first.status] || first.status} · ${stamp(first.created_at)}\n尚未同步到共享记忆${first.tags.length ? ' · 标签：' + first.tags.join('、') : ''}${first.source_ref ? '\n来源：' + first.source_ref : ''}${first.note ? '\n备注：' + first.note : ''}`;
+        : `${sources[first.source_type] || first.source_type} · ${statuses[first.status] || first.status} · ${stamp(first.created_at)}\n共享记忆：${syncStatuses[first.memory_sync_status] || '未同步'}${first.memory_sync_error ? ' · ' + first.memory_sync_error : ''}${first.memory_id ? '\n记忆 ID：' + first.memory_id : ''}${first.tags.length ? ' · 标签：' + first.tags.join('、') : ''}${first.source_ref ? '\n来源：' + first.source_ref : ''}${first.note ? '\n备注：' + first.note : ''}`;
       for (const button of el('entries').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.id === recordId(item)));
       el('reader-empty').hidden = true; el('details').hidden = false;
       if (window.matchMedia('(max-width:760px)').matches) el('details').scrollIntoView({block:'start'});
@@ -190,6 +197,24 @@
       el('export-result').textContent = `已保存到 MaiBot 所在设备：\n${result.saved_to}`;
     } catch (e) { error(e); el('export-result').textContent = '导出未确认，可重试；相同内容不会重复生成文件。'; }
     finally { busy = false; controls(); }
+  };
+  el('sync').onclick = async () => {
+    if (busy || !selected || kind !== 'reflection' || selected.status !== 'resolved') return;
+    const refreshCursor = cursor, refreshStack = [...stack], refreshFilters = filters, syncingId = recordId(selected);
+    busy = true; controls(); el('error').hidden = true; el('export-result').textContent = '正在写入共享记忆…';
+    let statusMessage = '';
+    try {
+      const result = await window.maibot.action('sync_candidate', {external_id:recordId(selected)});
+      if (!result.success) throw Error(result.error || '写入共享记忆失败');
+      statusMessage = result.already_synced ? '这条成果已同步过。' : '已写入 MaiBot A_Memorix；记忆 ID：' + result.memory_id;
+    } catch (e) { error(e); statusMessage = '写入失败：' + String(e.message || e); }
+    finally {
+      busy = false; controls();
+      const refreshed = await load(refreshCursor, refreshStack, refreshFilters);
+      const updated = (refreshed && refreshed.candidates || []).find(item => recordId(item) === syncingId);
+      if (updated) await open(updated);
+      el('export-result').textContent = statusMessage;
+    }
   };
   el('conversation').onclick = () => { if (ready) window.maibot.navigate('conversation').catch(error); };
   if (!window.maibot) { error('请从 MaiBot 的 MaiWill 插件工作区打开本页面。'); return; }

@@ -33,9 +33,17 @@ MaiWill 不统计普通 Planner/Replyer 聊天的 token，因此无需读取聊�
 
 ## 当前接入发现
 
-MaiWill 已有插件侧 SQLite 账本、兴趣 outbox、状态 API、WebUI 和本地待同步学习候选。A_Memorix 写入和自我来源召回仍未接通。MaiBot 有 `api.call`，A_Memorix 代码树里也保留了 `ingest_text` 的旧插件入口，但它明确标注为 legacy compatibility entry；当前 MaiBot 主线通过内部 `src/A_memorix/host_service.py` 接入，不由插件运行时加载。因此 MaiWill 不能用 `api.call` 调用这个旧入口，直接依赖内部 host_service 也会违反插件边界。源码还显示 `knowledge.search` 通过请求中的 `chat_id` 建立范围；`chat_id` 为空时不建立范围，不能安全用于私人插件发起的跨聊天“自我记忆”检索。插件现已限制 `memory.search` 只能用于当前逻辑上下文中显式记录兴趣的来源流，并把该流 ID 固定传给宿主；没有兴趣来源时不开放检索。
+MaiWill 已有插件侧 SQLite 账本、兴趣 outbox、状态 API、WebUI 和本地学习候选。正式插件能力仍没有 A_Memorix 写入和 bot-self 跨聊天召回 API。0.1.32 为个人使用增加默认关闭的本机 WebUI 桥接，使用管理 WebUI Token 调用粘贴导入、记录搜索和段落详情接口；这不是 MaiBot 公开的插件 API，也不适合作为通用分发权限模型。源码还显示 `knowledge.search` 通过请求中的 `chat_id` 建立范围；`chat_id` 为空时不建立范围，不能安全用于私人插件发起的跨聊天“自我记忆”检索。插件现已限制 `memory.search` 只能用于当前逻辑上下文中显式记录兴趣的来源流，并把该流 ID 固定传给宿主；没有兴趣来源时不开放检索。
 
-### 1. 插件边界目前没有共享记忆写入能力
+### 个人用途 WebUI 记忆桥接
+
+在 MaiWill 插件配置的“意志会话”中显式开启 `memory_bridge_enabled` 后，插件会从 `MAIBOT_INSTANCE_DIR` 指向的 MaiBot 实例 `data/webui.json` 读取 `access_token`，作为 `maibot_session` Cookie 向 `memory_webui_url` 发请求。地址必须是 localhost 或回环 IP；代理关闭、重定向拒绝，Token 不写入 MaiWill 配置、数据库或错误消息。该 Token 具有 WebUI 管理权限，因此启用桥接就等于授权 MaiWill 以管理员身份操作这台本机 MaiBot；要撤销授权，可关闭开关或轮换 WebUI Token。
+
+读取端只返回来源符合 `web_import:maiwill-<稳定摘要>.json` 且正文包含同一稳定候选 ID 标记的段落。写入端只接受本地状态为 `resolved` 的学习候选，内容固定来自 SQLite 中保存的标题、正文和标签；WebUI 页面确认后提交至 `/api/webui/memory/import/paste`，关闭 LLM 抽取，设为全局范围。成功后轮询导入任务，再检查来源文件名和正文标记以确认写入。WebUI 写入属于可持久化操作，完成后可以通过 MaiBot 记忆管理删除。
+
+这是供作者自用的短期适配：WebUI 路由、Cookie 认证、实例目录发现或导入语义改变时可能失效。默认关闭；必须设置 `MAIBOT_INSTANCE_DIR` 指向正确实例，否则失败关闭；不会在单元测试中读取真实 Token 或连接真实实例。正式公开的细粒度插件 API 发布后应替换此桥接。
+
+### 1. 正式插件边界目前没有共享记忆写入能力
 
 MaiBot 能力注册表只公开 `knowledge.search`，没有通用 `knowledge.ingest`。虽然 `src/A_memorix/plugin.py` 保留 `ingest_text` API 及其稳定 `external_id` 写入实现，但文件顶部说明该模块是 legacy compatibility entry，MaiBot 主线不再发现或加载它。当前实际接入位于内部 `src/A_memorix/host_service.py`，不属于 MaiWill 可调用的插件 API。`api.call` 只能调用已注册并公开的插件 API，因此不是可用绕行方式。
 
@@ -67,7 +75,7 @@ knowledge.ingest
 
 ## 未来公开能力的契约草案
 
-共享记忆写入和自我来源召回暂未接通。以下保留为未来公开能力的评估标准，不属于当前插件实施范围，也不要求使用者打补丁：
+默认关闭的个人 WebUI 方案已接通已整理候选的手动写入和 MaiWill 来源读回。聊天兴趣 outbox 自动同步、受控插件写入 API 与普通聊天的 `bot_self` 跨聊天召回仍未接通。以下保留为未来公开能力的评估标准，不属于当前桥接依赖：
 
 1. 在 MaiBot 接入层注册并授权 `knowledge.ingest`，把 MaiWill 自我记忆参数规范化为内部 `ingest_text` 请求，并在 host service 内以 `owner_scope=bot_self`、`scope_type=global` 覆盖元数据后赋予可信范围；不可信任插件调用方自行声明的 scope 字段。
 2. 在 A_Memorix 上游 `MaiBot_branch` 扩展正常记忆召回，使受信 `owner_scope=bot_self` 的记录可跨聊天流作为内部背景；明确过滤类型、提示词和数量策略，并保证私人用户事实绝不进入该范围。
@@ -75,7 +83,7 @@ knowledge.ingest
 4. 让 `interest.record` 的 outbox 可经可靠的同步任务进入同一宿主写入接口；为写入重放、冲突、过滤和普通聊天召回添加接入测试，确保旧聊天记忆和人物范围不回归。
 5. 公开模型接口若增加稳定请求 ID，可用于恢复实际 usage；当前插件继续保留未知用量记录，普通聊天不进入体力账本。
 
-在宿主写入 API 出现前，MaiWill 只管理本地候选。将来启用同步后，建议共享记忆写入 API 至少保证：相同 `external_id` + 相同正文返回幂等成功；相同 `external_id` + 不同正文明确报冲突；成功响应包含 `stored_ids` 或可识别的 `already_exists`，让 outbox 能在重试后安全标为已同步；过滤跳过不得被误报成存储成功。MaiWill 的候选行需要独立的同步状态、尝试次数和错误，不把 `resolved` 混作 `synced`。
+正式宿主写入 API 出现后，建议至少保证：相同 `external_id` + 相同正文返回幂等成功；相同 ID + 不同正文明确报冲突；成功响应包含 `stored_ids` 或可识别的 `already_exists`，让 outbox 能安全重试；过滤跳过不得被误报成存储成功。MaiWill 已为学习候选实现独立同步状态、尝试次数和错误，不把 `resolved` 混作 `synced`。
 
 不建议在 MaiBot 核心中增加 MaiWill 专用调度器或手机逻辑；这些属于插件能力和同一个意志会话。
 
@@ -85,7 +93,7 @@ knowledge.ingest
 
 模型选择已经改用原版公开能力；后续继续在插件边界内开发：
 
-1. 继续保留 MaiWill 本地候选队列；宿主能力接通前只可导出、查看和管理候选，不得标记为已同步。
+1. 继续保留 MaiWill 本地候选队列；个人 WebUI 桥接开启后才允许显式同步，正式插件 API 出现后替换临时适配器。已同步候选保留本地关联记录；删除共享副本需在 MaiBot 记忆管理中操作。
 2. 优先完成插件内可独立交付的模型选择、设备适配、日记、候选管理和会话恢复。
 3. 正式宿主或公开插件 API 提供写入能力后，再核实版本、权限、来源范围、幂等和召回契约，添加可选适配与集成测试。
 

@@ -14,6 +14,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from pydantic import BaseModel, Field
+from maiwill.agent import AgentLoop
 from maiwill.storage import Storage
 
 from scripts.build_zip import PROJECT_ROOT, build_zip
@@ -92,12 +93,14 @@ class PluginImportTest(unittest.TestCase):
                 storage.sync_resource_config(1_000_000, 100_000, start_at_capacity=True, now=now)
                 instance._storage = storage
                 instance._data_dir = database.parent
+                instance._find_instance_root = lambda: database.parent
                 instance.config = SimpleNamespace(
                     general=SimpleNamespace(
                         model_task="planner",
                         model_name="",
                         context_limit_tokens=258_000,
                         context_compression_threshold=0.8,
+                        memory_bridge_enabled=False,
                     ),
                     resources=SimpleNamespace(
                         recovery_tokens_per_hour=100_000,
@@ -164,12 +167,21 @@ class PluginImportTest(unittest.TestCase):
                 self.assertIn("行为风格：先观察，再做低风险的有益行动。", prompt_text)
                 self.assertIn("表达风格：面向用户回复简洁自然。", prompt_text)
                 self.assertIn("没有 active 目标绝不是休息理由", prompt_text)
-                self.assertIn("只有确实找不到具体、安全且有价值的发现步骤", prompt_text)
+                self.assertIn("所有手机命令固定作用于已配置的唯一设备", prompt_text)
                 self.assertIn("无事可做时不要选择 finish", prompt_text)
+                self.assertIn("可进行游戏操作、导航、拖拽、瞬移拖拽、长按、双击、滚动、文本输入、应用启动及设备内 shell/ADB", prompt_text)
+                self.assertNotIn("运行 shell/ADB 命令", prompt_text)
                 self.assertIn("用户已请求停止", prompt_text)
                 self.assertTrue(json.loads((PROJECT_ROOT / "webui.json").read_text(encoding="utf-8"))["pages"][0]["actions"]["force_stop_session"]["confirmation"].startswith("强制停止会立即中断"))
                 initial_payload = json.loads(prompt_text.split("输入数据：\n", 1)[1])
                 initial_available = initial_payload["available_capabilities"]
+                action_schema = initial_payload["decision_schema"]["oneOf"][0]
+                self.assertEqual(
+                    action_schema["properties"]["capability"]["enum"],
+                    sorted(item["name"] for item in initial_available),
+                )
+                self.assertEqual(action_schema["required"], ["decision", "capability", "arguments"])
+                self.assertIn("arguments 必须是对象", initial_payload["decision_output_instruction"])
                 self.assertEqual(
                     [item["kind"] for item in initial_payload["exploration_options"]],
                     ["self_directed_discovery"],
@@ -180,6 +192,17 @@ class PluginImportTest(unittest.TestCase):
                 available = json.loads(prompt_text.split("输入数据：\n", 1)[1])["available_capabilities"]
                 self.assertNotIn("phone.use", [item["name"] for item in available])
                 self.assertNotIn("chat.proactive", [item["name"] for item in available])
+
+                # With the personal memory bridge enabled but no active interest,
+                # prompt assembly must still include an empty recent_interests list.
+                instance.config.general.memory_bridge_enabled = True
+                bridge_empty_context = {}
+                asyncio.run(instance._request_decision("session-1", bridge_empty_context, []))
+                bridge_empty_prompt = capability_kwargs[-1]["prompt"]
+                bridge_empty_payload = json.loads(bridge_empty_prompt.split("输入数据：\n", 1)[1])
+                self.assertEqual(bridge_empty_payload["recent_interests"], [])
+                self.assertIn("memory.self.search", [item["name"] for item in bridge_empty_payload["available_capabilities"]])
+                instance.config.general.memory_bridge_enabled = False
 
                 # The assembled prompt is checked before the next request, so a sudden
                 # large capability result cannot push it past the configured target.
@@ -268,6 +291,11 @@ class PluginImportTest(unittest.TestCase):
                 configured_options = json.loads(configured_prompt.split("输入数据：\n", 1)[1])["exploration_options"]
                 self.assertEqual(configured_options[0]["kind"], "self_directed_discovery")
                 self.assertEqual(configured_options[0]["available_capabilities"], ["phone.use"])
+                phone_description = next(item["description"] for item in configured_available if item["name"] == "phone.use")
+                self.assertIn("double_tap", phone_description)
+                self.assertIn("instant_drag", phone_description)
+                self.assertIn("不插值中间轨迹", phone_description)
+                self.assertIn("自动等待并返回新截图", phone_description)
                 instance.config.phone.adb_path = ""
 
                 storage.record_interest(
@@ -520,7 +548,7 @@ class PluginImportTest(unittest.TestCase):
                 reflection = asyncio.run(instance._create_reflection(reflection_args))
                 self.assertTrue(reflection["success"])
                 self.assertTrue(reflection["external_id"].startswith("mai-will:learning:sha256:"))
-                self.assertIn("尚未同步", reflection["summary"])
+                self.assertIn("本地学习候选", reflection["summary"])
                 duplicate_reflection = asyncio.run(instance._create_reflection(reflection_args))
                 self.assertFalse(duplicate_reflection["created"])
                 self.assertEqual(duplicate_reflection["external_id"], reflection["external_id"])
@@ -535,23 +563,40 @@ class PluginImportTest(unittest.TestCase):
                 )
                 self.assertTrue(updated_reflection["success"])
                 self.assertEqual(updated_reflection["status"], "resolved")
-                self.assertIn("尚未同步", updated_reflection["summary"])
+                self.assertIn("同步状态", updated_reflection["summary"])
                 self.assertEqual(storage.get_status_snapshot()["open_learning_candidate_count"], 1)
                 listed_reflections = asyncio.run(
                     instance._list_reflections({"status": "resolved", "limit": 5})
                 )
                 self.assertTrue(listed_reflections["success"])
                 self.assertEqual(listed_reflections["count"], 1)
-                self.assertEqual(listed_reflections["memory_sync_status"], "not_synced")
+                self.assertEqual(listed_reflections["candidates"][0]["memory_sync_status"], "not_synced")
                 self.assertLessEqual(
                     len(listed_reflections["candidates"][0]["content_preview"]),
                     1000,
                 )
+                instance.config.general.memory_bridge_enabled = True
+                fake_memory_id = "e" * 64
+                instance._memory_bridge = lambda: SimpleNamespace(
+                    create_memory_import=lambda **kwargs: {
+                        "task_id": "task-mock", "memory_id": fake_memory_id, "status": "completed",
+                    }
+                )
+                synced_reflection = asyncio.run(instance._write_shared_memory({
+                    "external_id": reflection["external_id"],
+                }))
+                self.assertTrue(synced_reflection["success"])
+                persisted_candidate = storage.get_learning_candidate(reflection["external_id"])
+                self.assertEqual(persisted_candidate["memory_sync_status"], "synced")
+                self.assertEqual(persisted_candidate["memory_id"], fake_memory_id)
+                with self.assertRaisesRegex(ValueError, "已同步"):
+                    storage.update_learning_candidate_status(reflection["external_id"], "deferred")
                 deletion = asyncio.run(
                     instance.will_delete_learning_candidate(reflection["external_id"])
                 )
-                self.assertTrue(deletion["success"])
-                self.assertTrue(deletion["deleted"])
+                self.assertFalse(deletion["success"])
+                self.assertIn("MaiBot 记忆管理", deletion["error"])
+                self.assertEqual(storage.get_learning_candidate(reflection["external_id"])["memory_sync_status"], "synced")
                 self.assertFalse(
                     asyncio.run(
                         instance.will_delete_learning_candidate(reflection["external_id"])
@@ -559,7 +604,7 @@ class PluginImportTest(unittest.TestCase):
                 )
                 self.assertEqual(
                     asyncio.run(instance._list_reflections({"limit": 5}))["count"],
-                    1,
+                    2,
                 )
 
                 # Task selection and an explicit model must survive the packaged
@@ -580,6 +625,65 @@ class PluginImportTest(unittest.TestCase):
                 asyncio.run(instance._request_decision("session-1", {}, []))
                 self.assertEqual(capability_kwargs[-1]["task_name"], "replyer")
                 self.assertEqual(capability_kwargs[-1]["model_name"], "will-model")
+
+                # Exercise real provider -> parser -> retry -> action persistence,
+                # using a separate database and no model or device side effects.
+                format_storage = Storage(database.parent / "decision-format.sqlite3")
+                format_storage.initialize_session(enabled=True, auto_start=True)
+                format_storage.sync_resource_config(1000, 0, start_at_capacity=True)
+                format_storage.submit_intervention("先查看屏幕", "format-retry-message")
+                instance._storage = format_storage
+                instance.config.phone.adb_path = str(configured_adb_path)
+                responses = iter([
+                    '{"decision":"use_capability","capability":"phone.tap","arguments":{}}',
+                    '{"decision":"rest","duration_seconds":30,}',
+                    '```json\n{"decision":"use_capability","capability":"phone.use","arguments":{"action":"screen"}}\n```',
+                    '{"decision":"rest","duration_seconds":30}',
+                ])
+                format_prompts = []
+                actions = []
+
+                async def format_model(capability, **kwargs):
+                    self.assertEqual(capability, "llm.generate")
+                    format_prompts.append(kwargs["prompt"])
+                    if len(format_prompts) <= 3:
+                        self.assertEqual(format_storage.get_conversation()["pending_interventions"], 1)
+                    return {
+                        "success": True, "response": next(responses), "model_name": "format-test",
+                        "reasoning": "PRIVATE-REASONING-MUST-NOT-BE-PERSISTED",
+                        "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+                    }
+
+                async def screen(arguments):
+                    actions.append(arguments)
+                    return {"success": True, "summary": "模拟屏幕"}
+
+                instance.ctx = SimpleNamespace(call_capability=format_model)
+                asyncio.run(AgentLoop(
+                    format_storage, instance._request_decision, {"phone.use": screen},
+                ).run())
+                self.assertEqual(len(format_prompts), 4)
+                self.assertEqual(actions, [{"action": "screen"}])
+                self.assertEqual(format_storage.resource_snapshot()["spent_tokens"], 480)
+                self.assertEqual(format_storage.resource_snapshot()["balance"], 520)
+                self.assertEqual(format_storage.get_conversation()["pending_interventions"], 0)
+                format_messages = format_storage.get_conversation()["messages"]
+                errors = [item for item in format_messages if item["role"] == "system"]
+                self.assertEqual(len(errors), 2)
+                first_details = json.loads(errors[0]["details"])
+                self.assertEqual(first_details["diagnostics"]["error_code"], "unavailable_capability")
+                self.assertEqual(first_details["diagnostics"]["completion_tokens"], 20)
+                self.assertEqual(first_details["diagnostics"]["model_name"], "format-test")
+                self.assertEqual(json.loads(errors[1]["details"])["diagnostics"]["error_code"], "invalid_json")
+                self.assertIn("不在本轮 available_capabilities.name", format_prompts[1])
+                self.assertIn("JSON 语法错误", format_prompts[2])
+                self.assertNotIn("PRIVATE-REASONING", json.dumps(format_messages) + json.dumps(format_storage.get_session()))
+                with format_storage._connect() as connection:
+                    usage_rows = connection.execute("SELECT success, source FROM resource_usage ORDER BY recorded_at").fetchall()
+                self.assertEqual([row["success"] for row in usage_rows], [0, 0, 1, 1])
+                self.assertTrue(all("invalid_decision" in row["source"] for row in usage_rows[:2]))
+                instance._storage = storage
+                instance.config.phone.adb_path = ""
 
                 failed_requests = []
 

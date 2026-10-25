@@ -25,15 +25,17 @@ class ConfigFileTest(unittest.TestCase):
         with (PROJECT_ROOT / "config.toml").open("rb") as handle:
             config = tomllib.load(handle)
 
-        self.assertEqual(config["plugin"]["config_version"], "0.1.21")
+        self.assertEqual(config["plugin"]["config_version"], "0.1.35")
         self.assertIs(config["plugin"]["enabled"], True)
         validated = MaiWillConfig.model_validate(config)
-        self.assertEqual(validated.plugin.config_version, "0.1.21")
+        self.assertEqual(validated.plugin.config_version, "0.1.35")
         self.assertEqual(validated.general.idle_wait_seconds, 3600)
         self.assertEqual(validated.general.model_task, "planner")
         self.assertEqual(validated.general.model_name, "")
         self.assertEqual(validated.general.context_limit_tokens, 258_000)
         self.assertEqual(validated.general.context_compression_threshold, 0.8)
+        self.assertFalse(validated.general.memory_bridge_enabled)
+        self.assertEqual(validated.general.memory_webui_url, "http://127.0.0.1:8001")
         self.assertEqual(validated.resources.capacity_tokens, 10_000_000)
         self.assertEqual(validated.resources.recovery_tokens_per_hour, 1_000_000)
         self.assertTrue(validated.resources.start_at_capacity)
@@ -43,8 +45,9 @@ class ConfigFileTest(unittest.TestCase):
     def test_model_version_lives_under_plugin_section(self) -> None:
         defaults = MaiWillConfig().model_dump()
 
-        self.assertEqual(defaults["plugin"]["config_version"], "0.1.21")
+        self.assertEqual(defaults["plugin"]["config_version"], "0.1.35")
         self.assertNotIn("config_version", defaults)
+        self.assertFalse(defaults["general"]["memory_bridge_enabled"])
 
     def test_existing_config_keeps_user_settings_and_defaults_to_planner(self) -> None:
         config = MaiWillConfig.model_validate({
@@ -91,6 +94,17 @@ class ConfigFileTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             MaiWillConfig.model_validate({"general": {"context_limit_tokens": 100}})
 
+    def test_memory_bridge_defaults_off_and_accepts_loopback_only(self) -> None:
+        configured = MaiWillConfig.model_validate({"general": {
+            "memory_bridge_enabled": True,
+            "memory_webui_url": "http://[::1]:8123/",
+        }})
+        self.assertTrue(configured.general.memory_bridge_enabled)
+        self.assertEqual(configured.general.memory_webui_url, "http://[::1]:8123")
+        for url in ("http://example.com:8001", "http://127.0.0.1:8001/api", "http://localhost:8001/?x=1"):
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                MaiWillConfig.model_validate({"general": {"memory_webui_url": url}})
+
     def test_fields_keep_chinese_webui_metadata(self) -> None:
         plugin_config = MaiWillConfig.model_fields["plugin"].annotation
         resources_config = MaiWillConfig.model_fields["resources"].annotation
@@ -99,6 +113,8 @@ class ConfigFileTest(unittest.TestCase):
         capacity = resources_config.model_fields["capacity_tokens"]
         context_limit = general_config.model_fields["context_limit_tokens"]
         compression_threshold = general_config.model_fields["context_compression_threshold"]
+        memory_bridge_enabled = general_config.model_fields["memory_bridge_enabled"]
+        memory_webui_url = general_config.model_fields["memory_webui_url"]
         idle_wait = general_config.model_fields["idle_wait_seconds"]
         config_version = plugin_config.model_fields["config_version"]
 
@@ -107,6 +123,9 @@ class ConfigFileTest(unittest.TestCase):
         self.assertEqual(capacity.json_schema_extra["label"], "体力上限（token）")
         self.assertEqual(context_limit.default, 258_000)
         self.assertEqual(compression_threshold.default, 0.8)
+        self.assertFalse(memory_bridge_enabled.default)
+        self.assertIn("管理员", memory_bridge_enabled.description)
+        self.assertIn("回环", memory_webui_url.description)
         self.assertNotIn("decision_max_output_tokens", resources_config.model_fields)
         self.assertNotIn("single_call_limit_tokens", resources_config.model_fields)
         self.assertTrue(config_version.json_schema_extra["hidden"])

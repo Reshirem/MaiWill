@@ -36,7 +36,7 @@ class ExplorationOptionsTest(unittest.TestCase):
         self.assertIn("build_on_recent_action", kinds)
         self.assertIn("reflect_on_session", kinds)
 
-    def test_empty_sources_allow_only_safe_discovery_when_phone_is_available(self) -> None:
+    def test_empty_sources_allow_device_interaction_for_self_directed_discovery(self) -> None:
         options = build_exploration_options(
             available_capabilities=[{"name": "phone.use"}], learning_candidates=[],
             recent_interests=[], exploration_goals=[], recent_actions=[], context_message_count=0,
@@ -45,7 +45,9 @@ class ExplorationOptionsTest(unittest.TestCase):
         self.assertEqual(len(options), 1)
         self.assertEqual(options[0]["kind"], "self_directed_discovery")
         self.assertIn("不代表无事可做", options[0]["next_step"])
-        self.assertIn("不购买、不删除", options[0]["next_step"])
+        self.assertIn("设备内 shell/ADB", options[0]["next_step"])
+        self.assertIn("配置设备", options[0]["next_step"])
+        self.assertIn("不购买", options[0]["next_step"])
 
     def test_self_directed_discovery_is_available_without_goals_after_phone_observation(self) -> None:
         options = build_exploration_options(
@@ -59,6 +61,7 @@ class ExplorationOptionsTest(unittest.TestCase):
         discovery = next(option for option in options if option["kind"] == "self_directed_discovery")
         self.assertEqual(discovery["available_capabilities"], ["phone.use"])
         self.assertIn("单步发现", discovery["next_step"])
+        self.assertIn("设备内 shell/ADB", discovery["next_step"])
 
     def test_disables_phone_discovery_after_recent_read_only_observation(self) -> None:
         options = build_exploration_options(
@@ -69,6 +72,8 @@ class ExplorationOptionsTest(unittest.TestCase):
         )
 
         self.assertNotIn("discover_configured_phone", [option["kind"] for option in options])
+        discovery = next(option for option in options if option["kind"] == "self_directed_discovery")
+        self.assertIn("真实可见页面上的操作", discovery["next_step"])
 
     def test_no_sources_or_capabilities_does_not_invent_tasks(self) -> None:
         self.assertEqual(build_exploration_options(
