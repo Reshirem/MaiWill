@@ -109,6 +109,50 @@
           "confirmation": "强制停止会立即中断当前模型/能力调用。进行中的外部操作可能留下未知结果，不会自动重放。确定继续吗？"
         }
       }
+    },
+    {
+      "id": "records",
+      "title": "日记与成果",
+      "description": "查找并阅读麦麦留下的日记和本地学习成果，可导出到 MaiBot 所在设备。",
+      "placement": "workspace",
+      "mode": "custom",
+      "icon": "database",
+      "layout": "viewport",
+      "entry": "webui/records.html",
+      "queries": {
+        "records": {
+          "api": "will_records", "version": "1",
+          "parameters": {
+            "kind": {"type": "string", "required": true, "choices": ["diary", "reflection"]},
+            "query": {"type": "string", "max_length": 200},
+            "status": {"type": "string", "max_length": 20},
+            "date_from": {"type": "string", "max_length": 10},
+            "date_to": {"type": "string", "max_length": 10},
+            "cursor": {"type": "string", "max_length": 4096},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20}
+          }
+        },
+        "record": {
+          "api": "will_record", "version": "1",
+          "parameters": {
+            "kind": {"type": "string", "required": true, "choices": ["diary", "reflection"]},
+            "record_id": {"type": "string", "required": true, "max_length": 200},
+            "offset": {"type": "integer", "minimum": 0, "maximum": 131072},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 4000},
+            "revision": {"type": "string", "max_length": 64}
+          }
+        }
+      },
+      "actions": {
+        "export_record": {
+          "api": "will_export_record", "version": "1",
+          "parameters": {
+            "kind": {"type": "string", "required": true, "choices": ["diary", "reflection"]},
+            "record_id": {"type": "string", "required": true, "max_length": 200},
+            "revision": {"type": "string", "max_length": 64}
+          }
+        }
+      }
     }
   ]
 }

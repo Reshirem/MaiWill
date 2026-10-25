@@ -1,0 +1,198 @@
+<style>
+  :root { --bg:#f7f8fa; --panel:#fff; --text:#202834; --muted:#687381; --line:#e3e7ec; --accent:#137d70; --soft:#e9f5f1; --danger:#b84045; }
+  :root.dark { --bg:#171b21; --panel:#20262e; --text:#e6ebf2; --muted:#a0abba; --line:#343d48; --accent:#80cfbc; --soft:#243c38; --danger:#f1a1a5; }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--text); font:14px/1.65 var(--font-sans,system-ui),sans-serif; }
+  [hidden] { display:none!important; }
+  button,input,select,textarea { font:inherit; color:var(--text); }
+  button,input,select { border:1px solid var(--line); border-radius:8px; background:var(--panel); padding:7px 11px; }
+  button { cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled,input:disabled,select:disabled { opacity:.5; cursor:default; }
+  button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+  button[aria-pressed=true],.primary { background:var(--soft); border-color:var(--accent); color:var(--accent); }
+  .app { height:var(--maibot-viewport-height,780px); min-height:520px; max-width:1320px; margin:auto; display:flex; flex-direction:column; border:1px solid var(--line); border-radius:12px; overflow:hidden; background:var(--bg); }
+  header { background:var(--panel); padding:20px 24px 16px; border-bottom:1px solid var(--line); }
+  .heading,.tabs,.buttons,.pager { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+  .heading button { margin-left:auto; }
+  h1 { margin:0; font-size:21px; }
+  h2 { margin:0; font-size:19px; overflow-wrap:anywhere; }
+  .subtitle { color:var(--muted); margin:6px 0 14px; }
+  .badge { color:var(--accent); background:var(--soft); padding:3px 9px; border-radius:20px; font-size:12px; }
+  .filters { display:flex; align-items:end; flex-wrap:wrap; gap:10px; padding:14px 24px; border-bottom:1px solid var(--line); }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  label.search { flex:1; min-width:170px; }
+  input[type=date] { width:145px; }
+  #error { margin:0; color:var(--danger); background:var(--panel); padding:10px 24px; overflow-wrap:anywhere; }
+  .workspace { display:grid; grid-template-columns:330px minmax(0,1fr); flex:1; min-height:0; }
+  aside { border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  .list-title { padding:12px 17px; color:var(--muted); font-size:12px; }
+  #entries { flex:1; min-height:80px; overflow:auto; padding:0 10px 10px; }
+  .entry { display:block; width:100%; text-align:left; padding:13px; margin-bottom:8px; border-radius:9px; }
+  .entry strong { display:block; font-size:14px; overflow-wrap:anywhere; }
+  .entry small,.entry span { display:block; color:var(--muted); margin-top:5px; font-size:12px; overflow-wrap:anywhere; }
+  .entry span { display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .pager { padding:12px 17px; border-top:1px solid var(--line); font-size:12px; }
+  .pager button { padding:5px 9px; }
+  #page { margin-left:auto; color:var(--muted); }
+  .empty { padding:32px 18px; color:var(--muted); text-align:center; }
+  .reader { padding:22px 26px; overflow:auto; min-width:0; background:var(--panel); }
+  #details { height:100%; display:flex; flex-direction:column; min-height:280px; }
+  #meta { color:var(--muted); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; margin:9px 0 14px; }
+  #body { width:100%; flex:1; min-height:140px; resize:vertical; padding:16px; border:1px solid var(--line); border-radius:8px; background:var(--bg); line-height:1.85; }
+  .buttons { margin-top:14px; }
+  .hint,#export-result { font-size:12px; color:var(--muted); margin:8px 0 0; overflow-wrap:anywhere; white-space:pre-wrap; }
+  #export-result { color:var(--accent); }
+  #list-note { margin:0; padding:0 17px 9px; color:var(--muted); font-size:12px; }
+  @media(max-width:760px) {
+    .app { height:auto; min-height:var(--maibot-viewport-height,680px); }
+    header { padding:15px; } h1 { font-size:19px; }
+    .filters { padding:12px 15px; gap:8px; }
+    .workspace { display:block; }
+    aside { height:290px; border-right:0; border-bottom:1px solid var(--line); }
+    .reader { padding:16px; min-height:420px; } #details { height:auto; min-height:400px; }
+    #body { min-height:250px; }
+    .list-title { padding:7px 15px; } .pager { padding:6px 15px; }
+    input[type=date] { width:136px; } .heading button { padding:5px 8px; }
+  }
+</style>
+<main class="app">
+  <header>
+    <div class="heading"><h1>日记与成果</h1><button id="conversation">回到意识会话</button></div>
+    <p class="subtitle">把探索留下的记录找回来，读一读，再继续。</p>
+    <div class="tabs" aria-label="资料类型">
+      <button id="diary" aria-pressed="true" disabled>日记</button>
+      <button id="reflection" aria-pressed="false" disabled>学习成果</button>
+      <span class="badge">保存在 MaiWill 本地</span>
+    </div>
+  </header>
+  <section class="filters" aria-label="筛选资料">
+    <label class="search">搜索内容<input id="query" maxlength="200" placeholder="搜索标题、正文或标签" disabled></label>
+    <label id="status-label" hidden>处理状态<select id="status" disabled><option value="">全部状态</option><option value="pending">待处理</option><option value="researching">研究中</option><option value="resolved">已整理</option><option value="deferred">暂缓</option><option value="dismissed">已略过</option></select></label>
+    <label>开始日期<input id="from" type="date" disabled></label>
+    <label>结束日期<input id="to" type="date" disabled></label>
+    <button id="apply" class="primary" disabled>筛选</button><button id="clear" disabled>清空</button><button id="refresh" disabled>刷新</button>
+  </section>
+  <p id="error" role="alert" hidden></p>
+  <div class="workspace">
+    <aside aria-label="资料列表">
+      <div id="list-title" class="list-title" role="status">正在连接…</div>
+      <div id="entries"><p class="empty">正在加载资料…</p></div>
+      <p id="list-note"></p>
+      <div class="pager"><button id="previous" disabled>上一页</button><button id="next" disabled>下一页</button><span id="page">第 1 页</span></div>
+    </aside>
+    <section class="reader" aria-label="资料正文">
+      <div id="reader-empty" class="empty">选择一条记录，查看完整内容。</div>
+      <article id="details" hidden>
+        <h2 id="title"></h2><p id="meta"></p>
+        <textarea id="body" readonly aria-label="完整正文" spellcheck="false"></textarea>
+        <div class="buttons"><button id="select" disabled>全选正文</button><button id="export" disabled>导出 Markdown</button></div>
+        <p class="hint">导出文件保存在运行 MaiBot 的设备上。日期按该设备的本地日期筛选。</p>
+        <p id="export-result" role="status" aria-live="polite"></p>
+      </article>
+    </section>
+  </div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const el = id => document.getElementById(id);
+  const statuses = {pending:'待处理',researching:'研究中',resolved:'已整理',deferred:'暂缓',dismissed:'已略过'};
+  const sources = {'mai_will.knowledge':'知识','mai_will.experience':'经历','mai_will.expression':'表达观察','mai_will.phone':'手机见闻','mai_will.diary':'日记'};
+  let ready = false, busy = false, kind = 'diary', filters = {}, cursor = '', nextCursor = '', stack = [], selected = null;
+  const stamp = value => new Date(value * 1000).toLocaleString('zh-CN', {hour12:false});
+  const recordId = item => item.entry_id || item.external_id;
+  function error(error) { el('error').textContent = String(error.message || error); el('error').hidden = false; }
+  function controls() {
+    for (const id of ['diary','reflection','query','status','from','to','apply','clear','refresh']) el(id).disabled = !ready || busy;
+    for (const button of el('entries').querySelectorAll('button')) button.disabled = busy;
+    el('previous').disabled = !ready || busy || !stack.length;
+    el('next').disabled = !ready || busy || !nextCursor;
+    el('select').disabled = el('export').disabled = busy || !selected;
+  }
+  function clearDetail() {
+    selected = null; el('details').hidden = true; el('reader-empty').hidden = false;
+    el('reader-empty').textContent = '选择一条记录，查看完整内容。';
+    el('body').value = ''; el('export-result').textContent = '';
+  }
+  function readFilters() { return {query:el('query').value, status:kind === 'reflection' ? el('status').value : '', date_from:el('from').value, date_to:el('to').value}; }
+  async function load(targetCursor = '', targetStack = [], targetFilters = readFilters()) {
+    if (!ready || busy) return;
+    busy = true; clearDetail(); controls(); el('error').hidden = true;
+    el('list-title').textContent = '正在读取资料…';
+    try {
+      const result = await window.maibot.query('records', {kind, ...targetFilters, cursor:targetCursor, limit:10});
+      if (!result.success) throw Error(result.error || '读取资料失败');
+      cursor = targetCursor; stack = targetStack; filters = targetFilters; nextCursor = result.next_cursor || '';
+      const items = result.entries || result.candidates || [];
+      const nodes = items.map(item => {
+        const button = document.createElement('button'); button.className = 'entry'; button.dataset.id = recordId(item);
+        const title = document.createElement('strong'); title.textContent = item.title;
+        const meta = document.createElement('small'); meta.textContent = kind === 'diary' ? item.date : `${stamp(item.created_at)} · ${statuses[item.status] || item.status}`;
+        const preview = document.createElement('span'); preview.textContent = item.content_preview;
+        button.append(title, meta, preview); button.addEventListener('click', () => open(item)); return button;
+      });
+      if (!nodes.length) { const empty = document.createElement('p'); empty.className = 'empty'; empty.textContent = '没有找到符合条件的记录。'; nodes.push(empty); }
+      el('entries').replaceChildren(...nodes); el('entries').scrollTop = 0;
+      el('list-title').textContent = `${kind === 'diary' ? '日记' : '学习成果'} · 本页 ${items.length} 条`;
+      el('page').textContent = `第 ${stack.length + 1} 页`;
+      el('list-note').textContent = result.skipped_count ? `本次查询跳过 ${result.skipped_count} 个无法安全读取或格式无效的文件。` : kind === 'reflection' ? '已整理表示本地整理完成，尚未同步到共享记忆。' : '';
+    } catch (e) { error(e); nextCursor = ''; el('entries').replaceChildren(); el('list-title').textContent = '读取失败，请重试筛选或刷新。'; }
+    finally { busy = false; controls(); }
+  }
+  async function open(item) {
+    if (busy) return;
+    busy = true; clearDetail(); controls(); el('error').hidden = true;
+    el('reader-empty').textContent = '正在读取正文…';
+    try {
+      let offset = 0, revision = '', content = '', first, chars = 0;
+      do {
+        const part = await window.maibot.query('record', {kind, record_id:recordId(item), offset, limit:4000, revision});
+        if (!part.success) throw Error(part.error || '读取正文失败');
+        if (part.offset !== offset || typeof part.content !== 'string' || part.total_chars > 131072) throw Error('正文分页结果无效');
+        if (!first) first = part;
+        if (revision && revision !== part.revision) throw Error('正文已变化，请重新打开');
+        content += part.content; chars += Array.from(part.content).length; revision = part.revision;
+        if (part.total_chars !== first.total_chars) throw Error('正文长度已变化，请重新打开');
+        if (part.next_offset === null) { if (chars !== first.total_chars) throw Error('正文读取不完整，请重试'); break; }
+        if (part.next_offset !== chars || part.next_offset <= offset) throw Error('正文分页无法继续');
+        offset = part.next_offset;
+      } while (true);
+      // Python 的字符偏移以 Unicode code point 计数，正文拼接不依赖 JS 的 UTF-16 length。
+      selected = {...item, revision:first.revision}; el('title').textContent = first.title; el('body').value = content;
+      el('meta').textContent = kind === 'diary'
+        ? `日记 · ${first.recorded_at}\n记录标识：${first.entry_id}`
+        : `${sources[first.source_type] || first.source_type} · ${statuses[first.status] || first.status} · ${stamp(first.created_at)}\n尚未同步到共享记忆${first.tags.length ? ' · 标签：' + first.tags.join('、') : ''}${first.source_ref ? '\n来源：' + first.source_ref : ''}${first.note ? '\n备注：' + first.note : ''}`;
+      for (const button of el('entries').querySelectorAll('button')) button.setAttribute('aria-pressed', String(button.dataset.id === recordId(item)));
+      el('reader-empty').hidden = true; el('details').hidden = false;
+      if (window.matchMedia('(max-width:760px)').matches) el('details').scrollIntoView({block:'start'});
+    } catch (e) { error(e); el('reader-empty').textContent = '正文读取失败，请重新选择这条记录。'; }
+    finally { busy = false; controls(); }
+  }
+  el('apply').onclick = () => load();
+  el('refresh').onclick = () => load();
+  el('clear').onclick = () => { for (const id of ['query','status','from','to']) el(id).value = ''; void load(); };
+  el('query').onkeydown = event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); void load(); } };
+  el('next').onclick = () => load(nextCursor, [...stack, cursor], filters);
+  el('previous').onclick = () => load(stack[stack.length - 1] || '', stack.slice(0, -1), filters);
+  for (const type of ['diary','reflection']) el(type).onclick = () => {
+    kind = type; cursor = ''; stack = []; nextCursor = '';
+    for (const id of ['diary','reflection']) el(id).setAttribute('aria-pressed', String(id === kind));
+    el('status-label').hidden = kind === 'diary'; void load();
+  };
+  el('select').onclick = () => { el('body').focus(); el('body').select(); el('export-result').textContent = '正文已全选，可按 Ctrl+C 复制。'; };
+  el('export').onclick = async () => {
+    if (busy || !selected) return;
+    busy = true; controls(); el('error').hidden = true; el('export-result').textContent = '正在导出…';
+    try {
+      const result = await window.maibot.action('export_record', {kind, record_id:recordId(selected), revision:selected.revision});
+      if (!result.success) throw Error(result.error || '导出失败');
+      el('export-result').textContent = `已保存到 MaiBot 所在设备：\n${result.saved_to}`;
+    } catch (e) { error(e); el('export-result').textContent = '导出未确认，可重试；相同内容不会重复生成文件。'; }
+    finally { busy = false; controls(); }
+  };
+  el('conversation').onclick = () => { if (ready) window.maibot.navigate('conversation').catch(error); };
+  if (!window.maibot) { error('请从 MaiBot 的 MaiWill 插件工作区打开本页面。'); return; }
+  window.maibot.ready.then(() => { ready = true; controls(); void load(); }).catch(error);
+})();
+</script>
