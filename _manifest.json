@@ -1,7 +1,7 @@
 {
   "manifest_version": 2,
   "id": "maibot-community.maiwill",
-  "version": "0.1.36",
+  "version": "0.1.37",
   "name": "MaiWill（麦意）",
   "description": "以一个可恢复的逻辑意志会话统筹 MaiBot 自主能力。",
   "author": {

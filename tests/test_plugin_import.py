@@ -295,6 +295,8 @@ class PluginImportTest(unittest.TestCase):
                 self.assertIn("double_tap", phone_description)
                 self.assertIn("instant_drag", phone_description)
                 self.assertIn("不插值中间轨迹", phone_description)
+                self.assertIn("step_delay_ms（默认100毫秒", phone_description)
+                self.assertIn("settle_ms 仅控制整个动作结束后的截图等待", phone_description)
                 self.assertIn("自动等待并返回新截图", phone_description)
                 instance.config.phone.adb_path = ""
 

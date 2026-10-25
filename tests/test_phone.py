@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -178,31 +182,89 @@ class PhoneAdapterTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls[1][0], (
             "shell",
             "input motionevent DOWN 120 640; down_status=$?; "
+            "sleep 0.100; down_delay_status=$?; "
             "input motionevent MOVE 1100 95; move_status=$?; "
+            "sleep 0.100; move_delay_status=$?; "
             "input motionevent UP 1100 95; up_status=$?; "
-            "test $down_status -eq 0 && test $move_status -eq 0 && test $up_status -eq 0",
+            "test $down_status -eq 0 && test $down_delay_status -eq 0 "
+            "&& test $move_status -eq 0 && test $move_delay_status -eq 0 && test $up_status -eq 0",
         ))
         self.assertEqual(calls[2][0], ("exec-out", "screencap", "-p"))
 
-    async def test_instant_drag_attempts_release_even_if_move_event_fails(self) -> None:
-        commands = []
+    async def test_instant_drag_device_script_preserves_delays_and_releases_on_failure(self) -> None:
+        shell = shutil.which("sh")
+        if shell is None and os.name == "nt":
+            git = shutil.which("git")
+            if git:
+                candidate = Path(git).resolve().parent.parent / "bin" / "bash.exe"
+                if candidate.is_file():
+                    shell = str(candidate)
+        if shell is None:
+            self.skipTest("A POSIX shell is required to test the device script with fake input/sleep")
 
-        async def fake_run(*args, **kwargs):
-            if args == ("exec-out", "screencap", "-p"):
-                return b"\x89PNG\r\n\x1a\nmock image"
-            return b""
+        # Run the generated script with fake device commands. This verifies shell
+        # exit codes and UP after failures without connecting to ADB or sleeping.
+        for delay, failed_event, failed_sleep in (
+            (0, "", 0), (1, "", 0), (250, "", 0), (2000, "", 0),
+            (100, "DOWN", 0), (100, "MOVE", 0), (100, "UP", 0),
+            (100, "", 1), (100, "", 2),
+        ):
+            with self.subTest(delay=delay, failed_event=failed_event, failed_sleep=failed_sleep):
+                calls = []
+                trace = []
 
-        async def fake_shell(command, *, timeout=None):
-            commands.append(command)
-            return ""
+                async def fake_run(*args, **kwargs):
+                    calls.append(args)
+                    if args == ("exec-out", "screencap", "-p"):
+                        return b"\x89PNG\r\n\x1a\nmock image"
+                    return b""
 
-        self.phone._run = fake_run  # type: ignore[method-assign]
-        self.phone._shell = fake_shell  # type: ignore[method-assign]
-        result = await self.phone.use({
-            "action": "instant_drag", "x1": 10, "y1": 20, "x2": 30, "y2": 40,
-        })
-        self.assertTrue(result["success"])
-        self.assertIn("input motionevent UP 30 40", commands[0])
+                async def fake_shell(command, *, timeout=None):
+                    script = (
+                        f"failed_event='{failed_event}'\nfailed_sleep={failed_sleep}\nsleep_count=0\n"
+                        'input() { printf "input %s\\n" "$*"; test "$2" != "$failed_event"; }\n'
+                        'sleep() { printf "sleep %s\\n" "$1"; sleep_count=$((sleep_count + 1)); '
+                        'test "$sleep_count" -ne "$failed_sleep"; }\n'
+                        + command + "\n"
+                    )
+                    completed = await asyncio.to_thread(
+                        subprocess.run, [shell, "-s"], input=script, text=True,
+                        capture_output=True, timeout=5,
+                        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+                    )
+                    trace.extend(completed.stdout.splitlines())
+                    if completed.returncode:
+                        raise RuntimeError(f"mock device exited with {completed.returncode}")
+                    return ""
+
+                self.phone._run = fake_run  # type: ignore[method-assign]
+                self.phone._shell = fake_shell  # type: ignore[method-assign]
+                result = await self.phone.use({
+                    "action": "instant_drag", "x1": 10, "y1": 20, "x2": 30, "y2": 40,
+                    "step_delay_ms": delay, "settle_ms": 0,
+                })
+                self.assertEqual(trace, [
+                    "input motionevent DOWN 10 20", f"sleep {delay / 1000:.3f}",
+                    "input motionevent MOVE 30 40", f"sleep {delay / 1000:.3f}",
+                    "input motionevent UP 30 40",
+                ])
+                expected_success = not failed_event and not failed_sleep
+                self.assertEqual(result["success"], expected_success)
+                self.assertEqual(calls.count(("exec-out", "screencap", "-p")), int(expected_success))
+
+    async def test_instant_drag_rejects_invalid_step_delay_before_connecting(self) -> None:
+        async def unexpected_run(*args, **kwargs):
+            self.fail("Invalid delay must not reach ADB")
+
+        self.phone._run = unexpected_run  # type: ignore[method-assign]
+        for delay in (-1, 2001, True, 1.5, "100", None, "0.1; input tap 1 2"):
+            with self.subTest(delay=delay):
+                result = await self.phone.use({
+                    "action": "instant_drag", "x1": 10, "y1": 20, "x2": 30, "y2": 40,
+                    "step_delay_ms": delay,
+                })
+                self.assertFalse(result["success"])
+                self.assertIn("step_delay_ms", result["error"])
 
     async def test_scroll_uses_screen_dimensions_and_invalid_gestures_are_rejected(self) -> None:
         commands = []

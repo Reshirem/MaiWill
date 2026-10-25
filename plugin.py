@@ -381,7 +381,10 @@ class MaiWillPlugin(MaiBotPlugin):
                     "description": (
                         "使用专属 Android 设备。action 可为 status、screen、screenshot、tap、double_tap、long_press、swipe、scroll、drag、instant_drag、wait、type、back、home、enter、launch、shell、adb；"
                         "坐标动作使用 x/y 或 x1/y1/x2/y2，可选 duration_ms/settle_ms；scroll 使用 direction/distance_px，wait 使用 wait_ms。tap 可传 target 匹配可见控件；scroll 表示内容向该方向滚动。"
-                        "instant_drag 直接发送 DOWN 起点、MOVE 终点、UP 终点，不插值中间轨迹，适合瞬移拖动；drag 使用持续 swipe 轨迹，适合平滑移动。"
+                        "instant_drag 发送 DOWN 起点、MOVE 终点、UP 终点，不插值中间轨迹；"
+                        "DOWN→MOVE 和 MOVE→UP 之间各等待 step_delay_ms（默认100毫秒，可传0到2000的整数），让应用处理触摸。"
+                        "应用反应不过来时可增至200到300毫秒；settle_ms 仅控制整个动作结束后的截图等待，不能替代事件间隔。"
+                        "drag 使用持续 swipe 轨迹，适合平滑移动。"
                         "点击、手势、输入、导航和启动应用后会自动等待并返回新截图，观察失败时提示单独截图核实；不要原样重复无效手势，应根据新截图调整坐标、方向、距离或时长。"
                         "其他参数为 text、package、command 或 arguments。"
                         "可以为完成用户请求使用设备内 shell 和 ADB 子命令，也可按需要读取/写入设备文件；"

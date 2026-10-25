@@ -30,6 +30,8 @@ _SUPPORTED_ACTIONS = {
     "long_press", "swipe", "scroll", "drag", "instant_drag", "wait", "type",
     "back", "home", "enter", "launch", "shell", "adb",
 }
+_INSTANT_DRAG_STEP_DELAY_MS = 100
+_MAX_INSTANT_DRAG_STEP_DELAY_MS = 2000
 
 
 def normalize_device_address(value: Any) -> str:
@@ -239,13 +241,22 @@ class AdbPhone:
                     self._coordinate(arguments.get(name), name)
                     for name in ("x1", "y1", "x2", "y2")
                 )
+                step_delay_ms = self._coordinate(
+                    arguments.get("step_delay_ms", _INSTANT_DRAG_STEP_DELAY_MS),
+                    "step_delay_ms", maximum=_MAX_INSTANT_DRAG_STEP_DELAY_MS,
+                )
+                step_delay_seconds = f"{step_delay_ms / 1000:.3f}"
                 # Inject three discrete touch events on-device without swipe's
-                # interpolated path. Always attempt UP, even if DOWN/MOVE fails.
+                # interpolated path. Give the app time to process DOWN and MOVE.
+                # Always attempt UP, even if an event or a device-side sleep fails.
                 command = (
                     f"input motionevent DOWN {x1} {y1}; down_status=$?; "
+                    f"sleep {step_delay_seconds}; down_delay_status=$?; "
                     f"input motionevent MOVE {x2} {y2}; move_status=$?; "
+                    f"sleep {step_delay_seconds}; move_delay_status=$?; "
                     f"input motionevent UP {x2} {y2}; up_status=$?; "
-                    "test $down_status -eq 0 && test $move_status -eq 0 && test $up_status -eq 0"
+                    "test $down_status -eq 0 && test $down_delay_status -eq 0 "
+                    "&& test $move_status -eq 0 && test $move_delay_status -eq 0 && test $up_status -eq 0"
                 )
                 await self._shell(command)
             elif action == "scroll":
@@ -348,6 +359,11 @@ class AdbPhone:
                     AdbPhone._coordinate(arguments.get(name), name)
                 if action == "drag":
                     AdbPhone._coordinate(arguments.get("duration_ms", 500), "duration_ms", maximum=60000)
+                else:
+                    AdbPhone._coordinate(
+                        arguments.get("step_delay_ms", _INSTANT_DRAG_STEP_DELAY_MS),
+                        "step_delay_ms", maximum=_MAX_INSTANT_DRAG_STEP_DELAY_MS,
+                    )
             elif action == "scroll":
                 if arguments.get("direction") not in {"up", "down", "left", "right"}:
                     return "direction 必须是 up、down、left 或 right"
