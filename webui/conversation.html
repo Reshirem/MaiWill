@@ -1,0 +1,258 @@
+<style>
+  :root { --mw-bg:#f7f8fa; --mw-panel:#fff; --mw-text:#202834; --mw-muted:#687381; --mw-line:#e3e7ec; --mw-accent:#137d70; --mw-soft:#e9f5f1; --mw-danger:#b84045; }
+  :root.dark { --mw-bg:#171b21; --mw-panel:#20262e; --mw-text:#e6ebf2; --mw-muted:#a0abba; --mw-line:#343d48; --mw-accent:#80cfbc; --mw-soft:#243c38; --mw-danger:#f1a1a5; }
+  * { box-sizing:border-box; }
+  body { margin:0; color:var(--mw-text); font-family:var(--font-sans,system-ui),sans-serif; font-size:14px; }
+  button,textarea { font:inherit; }
+  button { border:1px solid var(--mw-line); background:var(--mw-panel); color:var(--mw-text); border-radius:8px; padding:8px 13px; cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--mw-accent); }
+  button:disabled { cursor:default; opacity:.5; }
+  button:focus-visible,textarea:focus-visible,summary:focus-visible { outline:2px solid var(--mw-accent); outline-offset:3px; }
+  .primary { color:var(--mw-panel); background:var(--mw-accent); border-color:var(--mw-accent); }
+  .danger { color:var(--mw-danger); }
+  .app { height:var(--maibot-viewport-height, 760px); min-height:440px; max-width:1200px; margin:auto; display:flex; flex-direction:column; overflow:hidden; border:1px solid var(--mw-line); border-radius:12px; background:var(--mw-bg); }
+  header { padding:20px 24px 16px; background:var(--mw-panel); border-bottom:1px solid var(--mw-line); }
+  .heading,.controls,.toolbar,.compose-footer,.message-meta { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  h1 { font-size:21px; line-height:1.3; margin:0; letter-spacing:.03em; }
+  .badge { font-size:12px; border-radius:20px; background:var(--mw-soft); color:var(--mw-accent); padding:4px 9px; }
+  .subtitle { margin:8px 0 16px; color:var(--mw-muted); line-height:1.6; }
+  .controls .spacer,.compose-footer .spacer { flex:1; }
+  .toolbar { padding:10px 24px; color:var(--mw-muted); font-size:12px; border-bottom:1px solid var(--mw-line); }
+  .toolbar button { font-size:12px; padding:5px 9px; }
+  .toolbar select { max-width:100%; padding:5px 9px; border:1px solid var(--mw-line); border-radius:7px; color:var(--mw-text); background:var(--mw-panel); }
+  .toolbar .page-info { margin-left:auto; }
+  #context-size { padding:8px 24px; color:var(--mw-muted); font-size:12px; border-bottom:1px solid var(--mw-line); }
+  #session-note { padding:9px 24px; margin:0; line-height:1.6; background:var(--mw-soft); color:var(--mw-text); }
+  #error { color:var(--mw-danger); background:var(--mw-panel); padding:9px 24px; line-height:1.6; white-space:pre-wrap; overflow-wrap:anywhere; max-height:110px; overflow:auto; }
+  [hidden] { display:none!important; }
+  #messages { flex:1; min-height:100px; overflow:auto; padding:24px; scroll-behavior:auto; }
+  .empty { text-align:center; color:var(--mw-muted); line-height:1.9; padding:45px 12px; }
+  .message { max-width:88%; margin:0 0 22px; width:fit-content; min-width:150px; }
+  .message.user { margin-left:auto; }
+  .message-meta { font-size:12px; color:var(--mw-muted); margin-bottom:7px; }
+  .message.user .message-meta { justify-content:flex-end; }
+  .message-meta strong { color:var(--mw-text); font-size:13px; font-weight:600; }
+  .bubble { padding:12px 16px; border:1px solid var(--mw-line); border-radius:3px 12px 12px 12px; background:var(--mw-panel); line-height:1.75; overflow-wrap:anywhere; }
+  .user .bubble { border-radius:12px 3px 12px 12px; background:var(--mw-soft); border-color:transparent; }
+  .content { white-space:pre-wrap; }
+  .tool { max-width:94%; }
+  .tool .bubble,.system .bubble { font-size:13px; background:transparent; }
+  .system { max-width:94%; }
+  details { margin-top:9px; color:var(--mw-muted); }
+  summary { cursor:pointer; font-size:12px; }
+  pre { font:12px/1.65 ui-monospace,Consolas,monospace; margin:9px 0 0; padding:10px; background:var(--mw-bg); border-radius:7px; white-space:pre-wrap; overflow-wrap:anywhere; max-height:280px; overflow:auto; }
+  .delivery { font-size:11px; color:var(--mw-accent); }
+  .composer { padding:15px 24px 17px; background:var(--mw-panel); border-top:1px solid var(--mw-line); }
+  .composer label { display:block; font-size:13px; font-weight:600; margin-bottom:9px; }
+  textarea { display:block; width:100%; min-height:80px; max-height:180px; resize:vertical; padding:12px; color:var(--mw-text); background:var(--mw-bg); border:1px solid var(--mw-line); border-radius:8px; line-height:1.6; }
+  textarea::placeholder { color:var(--mw-muted); }
+  .compose-footer { margin-top:10px; font-size:12px; color:var(--mw-muted); }
+  #feedback { margin-top:8px; color:var(--mw-accent); line-height:1.5; font-size:12px; }
+  @media(max-width:620px) { header { padding:15px; } h1 { font-size:19px; } .subtitle { margin-bottom:12px; } .toolbar,#session-note,#context-size,#error { padding-left:15px; padding-right:15px; } #messages { padding:18px 15px; } .composer { padding:12px 15px; } .message { max-width:97%; } .controls { gap:7px; } .controls button { padding:7px 9px; } .keyboard-hint { display:none; } }
+</style>
+<main class="app">
+  <header>
+    <div class="heading"><h1>意识会话</h1><span id="status" class="badge">正在连接</span></div>
+    <p class="subtitle">看看麦麦正在做什么，也可以在这里说句话，加入同一个意识循环。</p>
+    <div class="controls">
+      <button id="start" class="primary" disabled>启动会话</button>
+      <button id="new-session" class="danger" disabled>新建会话（清空上下文）</button>
+      <button id="stop" disabled>请求停止</button>
+      <button id="force" class="danger" disabled>强制停止</button>
+      <span class="spacer"></span><button id="overview">会话概览</button><button id="refresh" disabled>刷新</button>
+    </div>
+  </header>
+  <p id="session-note">正在读取会话状态…</p>
+  <div id="error" role="alert" hidden></div>
+  <div class="toolbar">
+    <label for="history-session">记录会话</label><select id="history-session" disabled aria-label="选择要查看的会话记录"></select>
+    <button id="older" disabled>更早的记录</button><button id="newer" hidden>后一页</button><button id="latest" hidden>回到最新</button>
+    <span id="page-info" class="page-info">每 3 秒自动更新</span>
+  </div>
+  <div id="context-size" aria-live="polite">正在读取当前上下文大小…</div>
+  <section id="messages" aria-label="意识循环会话记录" tabindex="0"><div class="empty">正在加载会话…</div></section>
+  <div class="composer">
+    <label for="draft">和麦麦说句话</label>
+    <textarea id="draft" rows="2" maxlength="4000" placeholder="例如：先把刚才的发现记下来，再休息一会儿。" aria-describedby="send-hint" disabled></textarea>
+    <div class="compose-footer">
+      <span id="send-hint" class="keyboard-hint">Enter 发送 · Shift + Enter 换行</span><span id="count">0 / 4000</span>
+      <span class="spacer"></span><button id="send" class="primary" disabled>发送</button>
+    </div>
+    <div id="feedback" role="status" aria-live="polite">消息会先保存，再由意识循环在下一轮处理。</div>
+  </div>
+</main>
+<script>
+(() => {
+  'use strict';
+  const el = id => document.getElementById(id);
+  const messages = el('messages'), draft = el('draft');
+  let ready = false, loading = false, acting = false, session = null;
+  let before = 0, nextBefore = 0, hasMore = false, pageStack = [], timer = null, selectedHistorySession = '', switchToCurrentSession = false;
+  let attempt = null, lastSignature = '', scrollToEnd = true, epoch = 0, refreshQueued = false, actionError = false;
+  const displayTime = value => value == null ? '升级前记录' : new Date(value * 1000).toLocaleString('zh-CN', { hour12:false });
+  function showError(error) { el('error').textContent = String(error.message || error); el('error').hidden = false; }
+  function controls() {
+    const blocked = !ready || acting;
+    el('send').disabled = blocked || !draft.value.trim() || draft.value.length > 4000;
+    el('count').textContent = `${draft.value.length} / 4000`;
+    el('start').disabled = blocked || !session || ['ACTIVE','STOP_REQUESTED','REST_REQUESTED','DISABLED'].includes(session.status);
+    el('new-session').disabled = blocked || !session || session.status === 'DISABLED';
+    el('stop').disabled = blocked || !session || !['ACTIVE','REST_REQUESTED','RESTING','DISCONNECTED'].includes(session.status);
+    el('force').disabled = blocked || !session || ['STOPPED','DISABLED'].includes(session.status);
+    el('refresh').disabled = !ready || loading || acting;
+    el('older').disabled = !ready || loading || acting || !hasMore;
+    el('newer').disabled = loading || acting;
+    el('latest').disabled = loading || acting;
+    el('newer').hidden = el('latest').hidden = before === 0;
+  }
+  function showSession(result) {
+    session = result.session;
+    el('status').textContent = session.status_display;
+    const pending = result.pending_interventions;
+    const tips = {
+      ACTIVE:'正在运行。新消息将在当前模型或工具调用完成后的下一轮读取。',
+      STOP_REQUESTED:'正在收尾。新消息会保存，待下次启动时处理。',
+      STOPPED:'会话已停止。可以先发送消息，再点击「启动会话」让麦麦处理。',
+      DISABLED:'插件已停用。消息仍可保存，重新启用并启动后处理。',
+      REST_REQUESTED:'麦麦正在准备休息。消息会排队，醒来后处理。',
+      RESTING:`麦麦正在休息${session.rest_until ? '，预计 ' + displayTime(session.rest_until) + ' 醒来' : ''}。也可以点击「启动会话」提前唤醒。`,
+      DISCONNECTED:`正在等待重连${session.next_retry_at ? '，下次尝试 ' + displayTime(session.next_retry_at) : ''}。消息会保留。`,
+    };
+    el('session-note').textContent = (tips[session.status] || session.status_display) + (pending ? ` 还有 ${pending} 条干预待处理。` : '') + (session.last_error ? ` 最近错误：${session.last_error}` : '');
+    const context = result.context_summary;
+    el('context-size').textContent = context
+      ? `当前会话上下文估算：${context.message_count} 条消息 · ${context.estimated_tokens.toLocaleString('zh-CN')} tokens · ${context.size_kib} KiB · 管理上限 ${context.limit_percent}%（${context.limit_tokens.toLocaleString('zh-CN')} tokens）。仅统计已保存历史，不含系统提示词及本轮临时输入。`
+      : '当前会话上下文大小暂不可用。';
+    const sessions = result.conversation_sessions || [];
+    if (!selectedHistorySession) selectedHistorySession = result.conversation_session_id || session.session_id;
+    if (!sessions.some(item => item.session_id === selectedHistorySession)) selectedHistorySession = result.conversation_session_id || session.session_id;
+    const selector = el('history-session'), prior = selector.value;
+    selector.replaceChildren(...sessions.map(item => {
+      const option = document.createElement('option'); option.value = item.session_id;
+      const stamp = item.created_at == null ? '旧会话' : new Date(item.created_at * 1000).toLocaleString('zh-CN', { hour12:false });
+      option.textContent = `${item.session_id === session.session_id ? '当前 · ' : ''}会话 ${item.session_id.slice(0,8)} · ${stamp} · ${item.entry_count} 条`;
+      return option;
+    }));
+    selector.value = sessions.some(item => item.session_id === selectedHistorySession) ? selectedHistorySession : (result.conversation_session_id || session.session_id);
+    if (prior !== selector.value && result.conversation_session_id !== selector.value) {
+      before = 0; pageStack = []; scrollToEnd = true;
+    }
+    selectedHistorySession = selector.value; selector.disabled = !ready || sessions.length < 2;
+  }
+  function render(records) {
+    const signature = JSON.stringify(records);
+    if (signature === lastSignature && !scrollToEnd) return;
+    const nearBottom = messages.scrollHeight - messages.scrollTop - messages.clientHeight < 70;
+    const previousTop = messages.scrollTop;
+    const expanded = new Set(Array.from(messages.querySelectorAll('details[open]')).map(node => node.dataset.sequence));
+    const fragment = document.createDocumentFragment();
+    if (!records.length) {
+      const empty = document.createElement('div'); empty.className = 'empty';
+      empty.textContent = '还没有会话记录。\n你可以先写下想说的话，再启动意识循环。'; empty.style.whiteSpace = 'pre-line'; fragment.append(empty);
+    }
+    for (const record of records) {
+      const article = document.createElement('article');
+      article.className = 'message ' + (['user','assistant','tool','system'].includes(record.role) ? record.role : 'system');
+      const meta = document.createElement('div'); meta.className = 'message-meta';
+      const name = document.createElement('strong'); name.textContent = record.label;
+      const time = document.createElement('span'); time.textContent = displayTime(record.created_at); meta.append(name, time);
+      if (record.role === 'user') {
+        const state = document.createElement('span'); state.className = 'delivery'; state.textContent = record.status === 'handled' ? '已处理' : '待处理'; meta.append(state);
+      }
+      const bubble = document.createElement('div'); bubble.className = 'bubble';
+      const text = document.createElement('div'); text.className = 'content'; text.textContent = record.content; bubble.append(text);
+      if (record.details) {
+        const details = document.createElement('details'); details.dataset.sequence = String(record.sequence); details.open = expanded.has(String(record.sequence));
+        const summary = document.createElement('summary'); summary.textContent = record.role === 'tool' ? '查看执行结果' : '查看详情';
+        const pre = document.createElement('pre'); pre.textContent = record.details; details.append(summary, pre); bubble.append(details);
+      }
+      article.append(meta, bubble); fragment.append(article);
+    }
+    messages.replaceChildren(fragment); lastSignature = signature;
+    messages.scrollTop = scrollToEnd || (before === 0 && nearBottom) ? messages.scrollHeight : previousTop;
+    scrollToEnd = false;
+  }
+  function schedule() {
+    clearTimeout(timer);
+    if (!document.hidden) timer = setTimeout(() => refresh(), 3000);
+  }
+  async function refresh() {
+    if (!ready || acting) return;
+    if (loading) { refreshQueued = true; return; }
+    loading = true; controls();
+    const queryEpoch = epoch;
+    try {
+      const result = await window.maibot.query('conversation', { before, limit:40, session_id:selectedHistorySession });
+      if (queryEpoch !== epoch) return;
+      hasMore = result.has_more; nextBefore = result.next_before; showSession(result);
+      if (switchToCurrentSession && selectedHistorySession !== result.session.session_id) {
+        switchToCurrentSession = false; selectedHistorySession = result.session.session_id; lastSignature = '';
+        void refresh(); return;
+      }
+      switchToCurrentSession = false; render(result.messages);
+      el('page-info').textContent = `${before ? '历史记录' : '最新记录'} · ${result.messages.length} 条 · 每 3 秒更新`;
+      if (!actionError) el('error').hidden = true;
+    } catch (error) { if (queryEpoch === epoch) showError(error); }
+    finally {
+      loading = false; controls();
+      if (refreshQueued && !acting) { refreshQueued = false; void refresh(); } else schedule();
+    }
+  }
+  async function action(name, args = {}) {
+    if (!ready || acting) return false;
+    acting = true; epoch += 1; clearTimeout(timer); controls();
+    try {
+      const result = await window.maibot.action(name, args);
+      if (result && result.success === false) throw new Error(result.error || '操作未完成');
+      actionError = false; el('error').hidden = true; return true;
+    } catch (error) { actionError = true; showError(error); return false; }
+    finally { acting = false; controls(); }
+  }
+  async function send() {
+    const content = draft.value.trim();
+    if (!content || !ready || acting || draft.value.length > 4000) return;
+    // Keep the same ID after an ambiguous timeout; the backend atomically deduplicates it.
+    if (!attempt || attempt.content !== content) {
+      const bytes = new Uint8Array(16); crypto.getRandomValues(bytes);
+      attempt = { content, client_message_id:Array.from(bytes, byte => byte.toString(16).padStart(2,'0')).join('') };
+    }
+    const sent = attempt;
+    const ok = await action('send_message', sent);
+    if (ok) {
+      if (draft.value.trim() === content) draft.value = '';
+      attempt = null; before = 0; pageStack = []; scrollToEnd = true;
+      el('feedback').textContent = '消息已保存。处理进度会显示在消息旁边。';
+    } else {
+      el('feedback').textContent = '尚未确认发送结果，文字已保留。直接重试同一条消息不会重复入队。';
+    }
+    controls(); await refresh(); draft.focus();
+  }
+  draft.addEventListener('input', controls);
+  draft.addEventListener('keydown', event => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) { event.preventDefault(); void send(); }
+  });
+  el('send').addEventListener('click', send);
+  el('new-session').addEventListener('click', async () => {
+    if (await action('new_session')) {
+      before = 0; pageStack = []; scrollToEnd = true; selectedHistorySession = ''; lastSignature = ''; switchToCurrentSession = true;
+      el('feedback').textContent = '新会话已创建，麦麦会从清空后的上下文继续自主探索。';
+    }
+    await refresh();
+  });
+  for (const [id, name] of [['start','start_session'],['stop','request_session_stop'],['force','force_stop_session']]) {
+    el(id).addEventListener('click', async () => { await action(name); await refresh(); });
+  }
+  el('history-session').addEventListener('change', event => {
+    selectedHistorySession = event.target.value; before = 0; pageStack = []; lastSignature = ''; scrollToEnd = true; void refresh();
+  });
+  el('refresh').addEventListener('click', refresh);
+  el('older').addEventListener('click', () => { pageStack.push(before); before = nextBefore; scrollToEnd = true; void refresh(); });
+  el('newer').addEventListener('click', () => { before = pageStack.pop() || 0; scrollToEnd = true; void refresh(); });
+  el('latest').addEventListener('click', () => { before = 0; pageStack = []; scrollToEnd = true; void refresh(); });
+  el('overview').addEventListener('click', () => { window.maibot.navigate('overview').catch(showError); });
+  document.addEventListener('visibilitychange', () => { clearTimeout(timer); if (!document.hidden) void refresh(); });
+  window.addEventListener('pagehide', () => clearTimeout(timer));
+  if (!window.maibot) { showError('请从 MaiBot 的 MaiWill 插件工作区打开本页面。'); return; }
+  window.maibot.ready.then(() => { ready = true; draft.disabled = false; controls(); void refresh(); }).catch(showError);
+})();
+</script>

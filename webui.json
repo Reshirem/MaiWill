@@ -1,0 +1,114 @@
+{
+  "schema_version": 2,
+  "required_capabilities": ["declarative_basic", "structured_arguments", "custom_pages"],
+  "workspace_title": "MaiWill 麦意",
+  "pages": [
+    {
+      "id": "overview",
+      "title": "会话概览",
+      "description": "启用后麦麦会持续自主探索，并按自己的判断休息；体力低时优先恢复。新消息会唤醒休息中的会话。停止请模型自行收尾；强制停止立即中断当前运行。",
+      "placement": "workspace",
+      "mode": "declarative",
+      "icon": "chart",
+      "queries": {
+        "status": {"api": "will_status", "version": "1"}
+      },
+      "actions": {
+        "start_session": {
+          "api": "will_start_session",
+          "version": "1"
+        },
+        "request_session_stop": {
+          "api": "will_request_session_stop",
+          "version": "1"
+        },
+        "force_stop_session": {
+          "api": "will_force_stop_session",
+          "version": "1",
+          "confirmation": "强制停止会立即中断当前模型/能力调用。进行中的外部操作可能留下未知结果，不会自动重放。确定继续吗？"
+        },
+        "restore_capacity": {
+          "api": "will_restore_resource_capacity",
+          "version": "1",
+          "confirmation": "确认将当前体力恢复到配置的上限吗？此操作会补满体力账本，不会清除已记录的消耗。"
+        }
+      },
+      "content": [
+        {
+          "type": "grid",
+          "columns": 3,
+          "children": [
+            {"type": "stat", "label": "会话状态", "value": {"source": "status", "field": "session.status_display"}},
+            {"type": "stat", "label": "当前体力", "value": {"source": "status", "field": "resource.balance_display"}},
+            {"type": "stat", "label": "体力占上限", "value": {"source": "status", "field": "resource.balance_percent_display"}},
+            {"type": "stat", "label": "待处理事件", "value": {"source": "status", "field": "queued_event_count"}}
+          ]
+        },
+        {"type": "button", "label": "启动", "action": "start_session", "variant": "primary"},
+        {"type": "button", "label": "停止", "action": "request_session_stop"},
+        {"type": "button", "label": "强制停止", "action": "force_stop_session", "variant": "danger"},
+        {"type": "button", "label": "恢复满体力", "action": "restore_capacity", "variant": "danger"},
+        {
+          "type": "card",
+          "label": "当前与近期探索目标",
+          "children": [
+            {
+              "type": "table",
+              "value": {"source": "status", "field": "exploration_goals"},
+              "columns": [
+                {"field": "title", "label": "目标"},
+                {"field": "status_display", "label": "状态"},
+                {"field": "progress_summary", "label": "最近进展"},
+                {"field": "next_step", "label": "下一步"},
+                {"field": "is_stalled", "label": "已停滞"}
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "conversation",
+      "title": "意识会话",
+      "description": "查看多段意识会话的对话、行动和执行结果；可新建会话并清空当前模型上下文。",
+      "placement": "workspace",
+      "mode": "custom",
+      "icon": "list",
+      "layout": "viewport",
+      "entry": "webui/conversation.html",
+      "queries": {
+        "conversation": {
+          "api": "will_conversation",
+          "version": "1",
+          "parameters": {
+            "before": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 50},
+            "session_id": {"type": "string", "max_length": 200}
+          }
+        }
+      },
+      "actions": {
+        "send_message": {
+          "api": "will_send_message",
+          "version": "1",
+          "parameters": {
+            "content": {"type": "string", "required": true, "max_length": 16000},
+            "client_message_id": {"type": "string", "required": true, "max_length": 80}
+          }
+        },
+        "start_session": {"api": "will_start_session", "version": "1"},
+        "new_session": {
+          "api": "will_new_session",
+          "version": "1",
+          "confirmation": "新建会话会清空当前模型上下文、停止正在运行的 Agent，并开始自主探索。旧会话记录、体力账本和待处理事件会保留；进行中的外部操作结果可能未知。确定继续吗？"
+        },
+        "request_session_stop": {"api": "will_request_session_stop", "version": "1"},
+        "force_stop_session": {
+          "api": "will_force_stop_session",
+          "version": "1",
+          "confirmation": "强制停止会立即中断当前模型/能力调用。进行中的外部操作可能留下未知结果，不会自动重放。确定继续吗？"
+        }
+      }
+    }
+  ]
+}
