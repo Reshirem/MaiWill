@@ -40,6 +40,7 @@
 | `interest.record` | 记录 | 在普通聊天中由麦麦显式记录一个好奇主题或知识缺口，并通知意志会话 | MaiWill 提供聊天可调用工具；可靠写入本地 outbox，尚未自动同步到共享记忆 |
 | `chat.proactive` | 行动 | 让 MaiBot 在意志自主判断值得分享时走正常主动回复流程 | 已适配 `maisaka.proactive.trigger`；目标仅限显式兴趣记录所在聊天流 |
 | `phone.use` | 观察/行动 | 读取控件树、点击、双击、长按、滑动、方向滚动、平滑/瞬移拖拽、等待、输入、启动 App、设备 shell/ADB 或保存截图 | 已接入插件内适配；设备固定为配置 IP:端口，ADB 未配置时不会连接；常规操作后自动回传截图 |
+| `phone.adb` | 观察/行动 | 直接执行 ADB 子命令或从 stdin 发送设备端 Shell 脚本 | 0.1.38 起优先使用；固定配置设备，每次仅一次 ADB 调用，连接、等待与截图均由模型显式安排 |
 | `reflection.create` | 整理 | 从一次活动结果中提取可复用知识、经验和表达模式 | 已接入插件本地学习候选表；使用稳定 `external_id` 幂等去重，候选可经显式确认写入共享记忆 |
 | `reflection.update` | 整理 | 更新学习候选的本地处理状态 | 已接入；支持 pending、researching、resolved、deferred、dismissed；resolved 不代表已同步 |
 | `reflection.list` | 观察 | 按状态查看本地学习候选 | 已接入；只读本地候选，桥接开启时同时显示真实同步状态 |
@@ -49,6 +50,30 @@
 | `rest` | 控制 | 请求休息指定时长；会话正常结束后才进入休息 | 代码将时长封顶为 12 小时 |
 
 ## 手机能力边界
+
+### 直接 ADB（0.1.38）
+
+`phone.adb` 接受 `argv` 字符串数组、可选 `stdin` 和 `timeout_seconds`。实现直接调用 `adb -s 配置地址 ...argv`，不调用旧 `phone.use` 动作分支，不改写坐标或脚本，不添加连接、等待和截图。`argv` 从子命令开始，不含程序路径或全局设备参数；后续参数原样传递，例如远端 `sh -s` 和 `logcat -s` 不会误判为设备选择器。设备离线时可单独显式请求 `argv=["connect"]`，此时唯一调用为 `adb connect 配置地址`。
+
+```json
+{
+  "decision": "use_capability",
+  "capability": "phone.adb",
+  "arguments": {
+    "argv": ["shell", "-T", "sh", "-s"],
+    "stdin": "input tap 120 300\nsleep 0.2\ninput tap 600 420\n",
+    "timeout_seconds": 30
+  }
+}
+```
+
+脚本按 UTF-8 原样通过标准输入发送，保留空白与换行；在 Android 设备上执行。连续动作、间隔、错误处理和必要的松开操作由脚本安排。`shell -T` 关闭伪终端，参数语义参照 [AOSP ADB 手册](https://android.googlesource.com/platform/packages/modules/adb/+/refs/heads/main/docs/user/adb.1.md)。`argv` 最多 128 个字符串、每项最多 32,768 字符、总计最多 65,536 字符；`stdin` 最多 65,536 字符，不能包含 NUL。超时默认 30 秒，可选 1～120 秒整数。
+
+结果包含 `exit_code`、`stdout`、`stderr`、`stdout_truncated` 和 `stderr_truncated`。文本输出各保留前 12,000 字节，继续排空管道以免大输出阻塞。非零退出保留两路输出，不自动重试；超时终止本机 ADB 进程，账本记录 `outcome_unknown`，因为设备端脚本可能已经部分执行。取消同样终止并回收本机进程；均不追加设备命令。
+
+需要图像时显式调用 `phone.adb`，参数为 `{"argv":["exec-out","screencap","-p"]}`。插件只保存这一次命令返回的 PNG，不额外截图；图片进入既有视觉上下文，普通命令会使旧截图过期。直接 ADB 的探索目标证据仅接受成功的显式截图，任意脚本退出码为 0 不代表界面目标完成。沿用唯一配置设备，不允许更换设备或控制 ADB 主机。
+
+### 原有手势封装
 
 `phone.use` 的设备选择器只有配置中的 `host:port`，默认 `127.0.0.1:16384`。不依赖 ADB 序列号，也不建立应用白名单。麦麦可按用户请求或自主判断查看设备状态/界面、打开应用、点击、双击、长按、滑动、按方向滚动、拖拽、等待、输入、执行 Android shell/ADB 子命令、传输设备文件或保存截图；`adb pull/push` 可与用户设备进行文件传输。`drag` 使用持续的 swipe 轨迹；`instant_drag` 直接顺序发送 DOWN 起点、MOVE 终点和 UP 终点，不插值中间坐标。点击、手势、输入、导航和启动应用会在执行后等待并自动截图；截图成功后下一轮可直接看到新画面，截图失败会明确说明操作已执行且观察失败。`scroll` 根据 Android 活动输入视口自动计算手指轨迹，兼容横竖屏；精确动作也可使用 `swipe`/`drag` 或 `instant_drag` 坐标。操作无效时应查看新截图并调整起终点、方向、距离或时长，不能原样盲目重试。实现层把 ADB 命令固定发往配置地址，禁止改选其他设备或操作 ADB 主机（如 `devices`、`connect`、`kill-server`）。ADB 路径留空时不尝试连接设备。未经用户明确要求，模型仍不得付款、购买、删除重要数据、修改账号安全设置、对外发布或发送内容，也不得读取或暴露私人凭据；这是操作行为提示，不是通用手机白名单。界面文字和图片均作为非可信外部资料处理。截图保存为插件数据目录中的 PNG 文件；最近一次成功截图会在下一次决策时作为公开 `llm.generate` 的结构化图文片段临时发送，Base64 不写入持久会话历史。插件仅读取自身截图目录下、大小不超过 6 MiB 且分辨率不超过 40 MP 的文件，为 RPC 消息封装和 Base64 开销保留余量；每张截图最多自动发送两次，成功决策后不重复发送。选择 `vlm` 任务不会自动触发截图，必须由意志先调用 `phone.use(action=screenshot)`。
 

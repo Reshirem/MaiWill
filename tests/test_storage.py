@@ -454,6 +454,24 @@ class StorageTest(unittest.TestCase):
         )
         self.assertEqual(progress["progress_summary"], "拖动后确认棋子移动到新位置")
 
+    def test_direct_adb_requires_explicit_successful_screenshot_as_evidence(self) -> None:
+        for step_id, arguments, result, expected in (
+            ("direct-command", {"argv": ["shell", "input tap 1 2"]}, {"success": True, "status": "completed", "exit_code": 0}, False),
+            ("direct-screenshot", {"argv": ["exec-out", "screencap", "-p"]}, {"success": True, "status": "screenshot", "exit_code": 0}, True),
+            ("direct-bad-image", {"argv": ["exec-out", "screencap", "-p"]}, {"success": False, "status": "observation_error", "exit_code": 0}, False),
+        ):
+            with self.subTest(step_id=step_id):
+                action = self.storage.start_action(step_id, "phone.adb", arguments, now=1001)
+                self.storage.finish_action(step_id, "completed" if result["success"] else "failed", result, now=1002)
+                with self.storage._connect() as connection:
+                    if expected:
+                        Storage._validate_exploration_evidence(connection, "action", action["action_id"], now=1003)
+                    else:
+                        with self.assertRaises(ValueError):
+                            Storage._validate_exploration_evidence(connection, "action", action["action_id"], now=1003)
+        recent = self.storage.get_recent_successful_actions(now=1004)
+        self.assertEqual([action["step_id"] for action in recent], ["direct-screenshot"])
+
     def test_gesture_without_post_action_screenshot_is_not_progress_evidence(self) -> None:
         interest = self.storage.record_interest(
             "拖动体验", "检查拖动反馈", "curiosity", [],

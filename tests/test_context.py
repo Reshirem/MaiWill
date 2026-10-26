@@ -87,6 +87,13 @@ class ContextManagementTest(unittest.TestCase):
         message = {"role": "observation", "text": "你好abc"}
         self.assertGreaterEqual(estimate_message_tokens(message), 4)
 
+    def test_direct_adb_pending_screenshot_is_kept_during_compaction(self) -> None:
+        call = {"role": "assistant", "decision": "use_capability", "capability": "phone.adb", "arguments": {"argv": ["exec-out", "screencap", "-p"]}}
+        result = {"role": "capability_result", "capability": "phone.adb", "result": {"success": True, "status": "screenshot", "path": "phone/screenshots/1234567890abcdef1234567890abcdef.png"}}
+        context = {"messages": [{"role": "observation", "text": "old" * 1000}, call, result]}
+        compress_context_if_needed(context, prompt_tokens=800, limit_tokens=1000, threshold=0.8)
+        self.assertEqual(context["messages"][1:], [call, result])
+
 
 if __name__ == "__main__":
     unittest.main()

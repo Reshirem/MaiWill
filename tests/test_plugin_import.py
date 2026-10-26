@@ -191,6 +191,7 @@ class PluginImportTest(unittest.TestCase):
                 self.assertIn("reflection.create", prompt_text)
                 available = json.loads(prompt_text.split("输入数据：\n", 1)[1])["available_capabilities"]
                 self.assertNotIn("phone.use", [item["name"] for item in available])
+                self.assertNotIn("phone.adb", [item["name"] for item in available])
                 self.assertNotIn("chat.proactive", [item["name"] for item in available])
 
                 # With the personal memory bridge enabled but no active interest,
@@ -259,26 +260,27 @@ class PluginImportTest(unittest.TestCase):
                 screenshot_file.write_bytes(
                     b"\x89PNG\r\n\x1a\n" + (13).to_bytes(4, "big") + b"IHDR" + ihdr + b"\0\0\0\0"
                 )
-                vision_context = {"messages": [{
-                    "role": "capability_result",
-                    "capability": "phone.use",
-                    "result": {"success": True, "status": "screenshot", "path": screenshot_path},
-                }]}
-                asyncio.run(instance._request_decision("session-1", vision_context, []))
-                vision_prompt = capability_kwargs[-1]["prompt"]
-                self.assertIsInstance(vision_prompt, list)
-                image_parts = vision_prompt[0]["content"]
-                self.assertEqual(image_parts[2]["type"], "image")
-                self.assertEqual(image_parts[2]["image_format"], "png")
-                self.assertEqual(base64.b64decode(image_parts[2]["image_base64"]), screenshot_file.read_bytes())
-                storage.save_session_context(vision_context)
-                saved_context = storage.get_session()["context"]
-                self.assertEqual(saved_context["messages"][0]["result"]["status"], "visual_input_sent")
-                self.assertNotIn("path", saved_context["messages"][0]["result"])
-                self.assertNotIn("image_base64", json.dumps(saved_context))
-                next_vision_context = storage.get_session()["context"]
-                asyncio.run(instance._request_decision("session-1", next_vision_context, []))
-                self.assertIsInstance(capability_kwargs[-1]["prompt"], str)
+                for phone_capability in ("phone.use", "phone.adb"):
+                    vision_context = {"messages": [{
+                        "role": "capability_result",
+                        "capability": phone_capability,
+                        "result": {"success": True, "status": "screenshot", "path": screenshot_path},
+                    }]}
+                    asyncio.run(instance._request_decision("session-1", vision_context, []))
+                    vision_prompt = capability_kwargs[-1]["prompt"]
+                    self.assertIsInstance(vision_prompt, list)
+                    image_parts = vision_prompt[0]["content"]
+                    self.assertEqual(image_parts[2]["type"], "image")
+                    self.assertEqual(image_parts[2]["image_format"], "png")
+                    self.assertEqual(base64.b64decode(image_parts[2]["image_base64"]), screenshot_file.read_bytes())
+                    storage.save_session_context(vision_context)
+                    saved_context = storage.get_session()["context"]
+                    self.assertEqual(saved_context["messages"][0]["result"]["status"], "visual_input_sent")
+                    self.assertNotIn("path", saved_context["messages"][0]["result"])
+                    self.assertNotIn("image_base64", json.dumps(saved_context))
+                    next_vision_context = storage.get_session()["context"]
+                    asyncio.run(instance._request_decision("session-1", next_vision_context, []))
+                    self.assertIsInstance(capability_kwargs[-1]["prompt"], str)
 
                 instance.config.phone.adb_path = str(configured_adb_path)
                 configured_phone_context = {}
@@ -288,9 +290,25 @@ class PluginImportTest(unittest.TestCase):
                     configured_prompt.split("输入数据：\n", 1)[1]
                 )["available_capabilities"]
                 self.assertIn("phone.use", [item["name"] for item in configured_available])
+                self.assertIn("phone.adb", [item["name"] for item in configured_available])
                 configured_options = json.loads(configured_prompt.split("输入数据：\n", 1)[1])["exploration_options"]
                 self.assertEqual(configured_options[0]["kind"], "self_directed_discovery")
-                self.assertEqual(configured_options[0]["available_capabilities"], ["phone.use"])
+                self.assertEqual(configured_options[0]["available_capabilities"], ["phone.adb"])
+                direct_description = next(item["description"] for item in configured_available if item["name"] == "phone.adb")
+                self.assertIn("不自动 connect", direct_description)
+                self.assertIn("stdin", direct_description)
+                self.assertIn("exit_code", direct_description)
+                direct_arguments = {"argv": ["shell", "-T", "sh", "-s"], "stdin": "input tap 10 20\n"}
+                direct_calls = []
+
+                async def fake_direct_execute(adapter, arguments):
+                    direct_calls.append((adapter.address, adapter.adb_path, arguments))
+                    return {"success": True, "exit_code": 0, "stdout": "ok", "stderr": ""}
+
+                with patch.object(module.DirectAdb, "execute", fake_direct_execute):
+                    direct_result = asyncio.run(instance._use_adb(direct_arguments))
+                self.assertTrue(direct_result["success"])
+                self.assertEqual(direct_calls, [("127.0.0.1:16384", str(configured_adb_path), direct_arguments)])
                 phone_description = next(item["description"] for item in configured_available if item["name"] == "phone.use")
                 self.assertIn("double_tap", phone_description)
                 self.assertIn("instant_drag", phone_description)

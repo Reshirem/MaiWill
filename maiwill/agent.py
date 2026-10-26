@@ -254,7 +254,10 @@ class AgentLoop:
                 result = await handler(handler_arguments)
                 if not isinstance(result, dict):
                     result = {"success": True, "result": result}
-                status = "completed" if result.get("success", True) else "failed"
+                status = (
+                    "outcome_unknown" if result.get("status") == "outcome_unknown"
+                    else "completed" if result.get("success", True) else "failed"
+                )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:

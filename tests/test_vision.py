@@ -78,6 +78,23 @@ class VisionInputTest(unittest.TestCase):
     def test_image_prompt_budget_uses_dimensions_not_base64_length(self) -> None:
         self.assertGreater(estimate_prompt_image_tokens(png_header(1920, 1080)), 256)
 
+    def test_direct_adb_screenshot_can_be_consumed_and_commands_expire_old_images(self) -> None:
+        for capability in ("phone.use", "phone.adb"):
+            screenshot = {"success": True, "status": "screenshot", "path": SCREENSHOT_PATH}
+            context = {"messages": [{"role": "capability_result", "capability": capability, "result": screenshot}]}
+            self.assertIs(latest_pending_screenshot(context), screenshot)
+            context["messages"].append({
+                "role": "capability_result", "capability": "phone.adb",
+                "result": {"success": True, "status": "completed", "exit_code": 0},
+            })
+            self.assertIsNone(latest_pending_screenshot(context))
+        context = {"messages": [{"role": "capability_result", "capability": "phone.adb", "result": screenshot}]}
+        mark_screenshot_attempted(context, screenshot)
+        self.assertEqual(screenshot["visual_attempts"], 1)
+        compact_consumed_screenshot(context, screenshot)
+        self.assertIsNone(latest_pending_screenshot(context))
+        self.assertEqual(context["messages"][0]["result"]["status"], "visual_input_sent")
+
 
 if __name__ == "__main__":
     unittest.main()

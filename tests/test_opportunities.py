@@ -6,6 +6,16 @@ from maiwill.opportunities import build_exploration_options
 
 
 class ExplorationOptionsTest(unittest.TestCase):
+    def test_direct_adb_is_preferred_and_requires_explicit_screenshots(self) -> None:
+        options = build_exploration_options(
+            available_capabilities=[{"name": "phone.use"}, {"name": "phone.adb"}],
+            learning_candidates=[], recent_interests=[], exploration_goals=[], recent_actions=[],
+            context_message_count=0,
+        )
+        self.assertEqual(options[0]["available_capabilities"], ["phone.adb"])
+        self.assertIn("显式请求截图", options[0]["next_step"])
+        self.assertNotIn("自动返回操作后截图", options[0]["next_step"])
+
     def test_lists_actionable_existing_goals_interests_candidates_and_phone_discovery(self) -> None:
         options = build_exploration_options(
             available_capabilities=[

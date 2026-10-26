@@ -6,6 +6,8 @@ import json
 import unicodedata
 from typing import Any
 
+from .vision import PHONE_CAPABILITIES
+
 
 def estimate_text_tokens(serialized: str) -> int:
     """以 CJK 字符约一 token、其他字符约四字符一 token 粗估文本长度。"""
@@ -65,7 +67,7 @@ def compress_context_if_needed(
                     and result.get("capability") == message.get("capability")
                 ):
                     keep_screenshot = (
-                        result.get("capability") == "phone.use"
+                        result.get("capability") in PHONE_CAPABILITIES
                         and isinstance(result.get("result"), dict)
                         and result["result"].get("status") == "screenshot"
                         and result["result"].get("visual_input_sent") is not True

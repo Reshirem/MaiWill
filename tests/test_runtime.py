@@ -496,6 +496,28 @@ class SessionRuntimeTest(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result["retryable"])
         self.assertIn("不能安全自动重放", result["error"])
 
+    async def test_explicit_unknown_adb_result_is_persisted_and_not_replayed(self) -> None:
+        self.storage.initialize_session(enabled=True)
+        self.storage.set_session_status("ACTIVE")
+        calls = []
+
+        async def provider(session_id, context, events):
+            return {"decision": "rest", "duration_seconds": 10}
+
+        async def adb_timeout(arguments):
+            calls.append(arguments)
+            return {"success": False, "status": "outcome_unknown", "stdout": "partial", "retryable": False}
+
+        agent = AgentLoop(self.storage, provider, {"phone.adb": adb_timeout})
+        decision = {"decision": "use_capability", "capability": "phone.adb", "arguments": {"argv": ["shell", "input tap 1 2"]}}
+        session_id = self.storage.get_session()["session_id"]
+        first = await agent._execute_capability(session_id, {}, decision)
+        second = await agent._execute_capability(session_id, {}, decision)
+        self.assertEqual(first, second)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(first["stdout"], "partial")
+        self.assertEqual(self.storage.get_status_snapshot()["recent_actions"][0]["status"], "outcome_unknown")
+
     async def test_unload_cancels_inflight_action_without_replaying_it(self) -> None:
         self.storage.initialize_session(enabled=True)
         self.storage.set_session_status("ACTIVE")

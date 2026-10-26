@@ -39,9 +39,13 @@ def build_exploration_options(
                 })
                 break
 
-    phone_enabled = "phone.use" in capability_names
+    direct_adb = "phone.adb" in capability_names
+    phone_enabled = direct_adb or "phone.use" in capability_names
     recent_phone_observation = any(
-        action.get("capability") == "phone.use"
+        action.get("capability") == "phone.adb"
+        and isinstance(action.get("arguments"), dict)
+        and action["arguments"].get("argv") == ["exec-out", "screencap", "-p"]
+        or action.get("capability") == "phone.use"
         and (
             action.get("action_kind") in {"status", "screen", "screenshot", "wait"}
             or (
@@ -55,12 +59,20 @@ def build_exploration_options(
         options.append({
             "kind": "self_directed_discovery",
             "title": "没有现成目标时，自主发现下一件值得做的事",
-            "available_capabilities": ["phone.use"],
+            "available_capabilities": ["phone.adb"] if direct_adb else ["phone.use"],
             "next_step": (
                 "没有活动目标或预先给定的来源，不代表无事可做。查看专属设备当前可见内容；"
-                + ("近期观察仍可作为线索，继续完成真实可见页面上的操作。" if recent_phone_observation else "可从 status、screen 或 screenshot 了解设备当前状态。")
-                + "从真实可见内容里自己挑一个有趣、具体的小问题，按需要点击、长按、双击、滚动、平滑拖拽或瞬移拖拽、输入、启动应用或使用设备内 shell/ADB 解决；观察自动返回操作后截图，根据画面调整，不要重复无效手势。"
-                "单步发现无需先建目标，只有值得持续调查时才引用成功行动创建目标。"
+                + ("近期观察仍可作为线索，继续完成真实可见页面上的操作。" if recent_phone_observation else (
+                    "用 phone.adb 的 argv=[\"exec-out\",\"screencap\",\"-p\"] 观察当前画面。"
+                    if direct_adb else "可从 status、screen 或 screenshot 了解设备当前状态。"
+                ))
+                + (
+                    "优先用 phone.adb 直接执行设备内 shell/ADB，将连续操作写成一次 Shell 脚本，自行安排命令和间隔；"
+                    "没有隐式重连、等待或截图，需要看结果时显式请求截图，根据画面调整。"
+                    if direct_adb else
+                    "从真实可见内容里自己挑一个有趣、具体的小问题，按需要点击、长按、双击、滚动、平滑拖拽或瞬移拖拽、输入、启动应用或使用设备内 shell/ADB 解决；观察自动返回操作后截图，根据画面调整，不要重复无效手势。"
+                )
+                + "单步发现无需先建目标，只有值得持续调查时才引用成功行动创建目标。"
                 "固定操作配置设备，不改选设备或控制 ADB 主机；不付款、不购买、不删除重要数据、不修改账号安全设置、"
                 "不发布或向他人发送内容，也不读取或暴露私人凭据，除非用户明确要求。完成一步后重新判断是否值得继续，避免重复旧观察；"
                 "没有具体、安全方向或体力需要恢复时再休息，不要为了保持忙碌而编造任务。"
@@ -101,7 +113,12 @@ def build_exploration_options(
         options.append({
             "kind": "discover_configured_phone",
             "title": "观察已配置的专属手机，寻找真实可推进的主题",
-            "next_step": "从 status、screen 或 screenshot 了解设备当前情况；根据可见内容选择合适操作，必要时可点击、长按、双击、滚动、平滑拖拽或瞬移拖拽、等待、输入、启动应用或使用设备内 shell/ADB。常规操作自动返回新截图，根据结果调整而不要盲目重复。若观察到值得继续的主题，用成功行动的 action_id 建立目标。",
+            "next_step": (
+                "用 phone.adb 显式执行 exec-out screencap -p 观察当前画面，再直接执行 ADB 命令或设备端脚本推进目标。"
+                "不插入隐式操作；需要看结果时再次显式截图，成功截图的 action_id 可作为目标证据。"
+                if direct_adb else
+                "从 status、screen 或 screenshot 了解设备当前情况；根据可见内容选择合适操作，必要时可点击、长按、双击、滚动、平滑拖拽或瞬移拖拽、等待、输入、启动应用或使用设备内 shell/ADB。常规操作自动返回新截图，根据结果调整而不要盲目重复。若观察到值得继续的主题，用成功行动的 action_id 建立目标。"
+            ),
         })
 
     if recent_actions:

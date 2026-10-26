@@ -31,6 +31,8 @@ def _is_phone_evidence(arguments: dict[str, Any], result: dict[str, Any]) -> boo
         action in _PHONE_OBSERVATION_ACTIONS
         or action in _PHONE_SCREENSHOT_ACTIONS | _PHONE_INTERACTIVE_ACTIONS
         and result.get("status") == "screenshot"
+        or arguments.get("argv") == ["exec-out", "screencap", "-p"]
+        and result.get("status") == "screenshot"
     )
 
 
@@ -1401,9 +1403,9 @@ class Storage:
                 if (
                     not action_result.get("success", True)
                     or found["capability"].startswith("exploration.goal.")
-                    or found["capability"] not in {"memory.search", "diary.write", "reflection.create", "phone.use"}
+                    or found["capability"] not in {"memory.search", "diary.write", "reflection.create", "phone.use", "phone.adb"}
                     or (
-                        found["capability"] == "phone.use"
+                        found["capability"] in {"phone.use", "phone.adb"}
                         and not _is_phone_evidence(action_arguments, action_result)
                     )
                 ):
@@ -1729,9 +1731,9 @@ class Storage:
             arguments = action["arguments"]
             if not result.get("success", True):
                 continue
-            if action["capability"] not in {"memory.search", "diary.write", "reflection.create", "phone.use"}:
+            if action["capability"] not in {"memory.search", "diary.write", "reflection.create", "phone.use", "phone.adb"}:
                 continue
-            if action["capability"] == "phone.use" and not _is_phone_evidence(arguments, result):
+            if action["capability"] in {"phone.use", "phone.adb"} and not _is_phone_evidence(arguments, result):
                 continue
             eligible.append(action)
             if len(eligible) >= limit:

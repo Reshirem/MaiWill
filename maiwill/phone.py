@@ -138,6 +138,10 @@ class AdbPhone:
 
     async def _save_screenshot(self) -> dict[str, Any]:
         image = await self._run("exec-out", "screencap", "-p", timeout=25)
+        return await self._store_screenshot(image)
+
+    async def _store_screenshot(self, image: bytes) -> dict[str, Any]:
+        """保存已取得的截图字节，不额外发送设备命令。"""
         if not image.startswith(b"\x89PNG\r\n\x1a\n"):
             raise RuntimeError("ADB 未返回有效 PNG 截图")
         root = self.data_dir.resolve()

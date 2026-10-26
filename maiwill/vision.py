@@ -12,17 +12,18 @@ MAX_SCREENSHOT_SIDE = 8192
 MAX_SCREENSHOT_PIXELS = 40_000_000
 MAX_VISUAL_ATTEMPTS = 2
 _SCREENSHOT_PATH = re.compile(r"phone/screenshots/[0-9a-f]{32}\.png\Z")
+PHONE_CAPABILITIES = ("phone.use", "phone.adb")
 
 
 def latest_pending_screenshot(context: dict[str, Any]) -> dict[str, Any] | None:
-    """只返回最近一次 phone.use 截图结果；其他手机操作会使旧图过期。"""
+    """只返回最近一次手机能力的截图；其他手机操作会使旧图过期。"""
     messages = context.get("messages")
     if not isinstance(messages, list):
         return None
     for message in reversed(messages):
         if not isinstance(message, dict):
             continue
-        if message.get("role") != "capability_result" or message.get("capability") != "phone.use":
+        if message.get("role") != "capability_result" or message.get("capability") not in PHONE_CAPABILITIES:
             continue
         result = message.get("result")
         if (
@@ -83,7 +84,7 @@ def mark_screenshot_attempted(context: dict[str, Any], screenshot: dict[str, Any
         if (
             isinstance(message, dict)
             and message.get("role") == "capability_result"
-            and message.get("capability") == "phone.use"
+            and message.get("capability") in PHONE_CAPABILITIES
             and isinstance(message.get("result"), dict)
             and message["result"].get("path") == path
         ):
@@ -102,7 +103,7 @@ def compact_consumed_screenshot(context: dict[str, Any], screenshot: dict[str, A
         if (
             isinstance(message, dict)
             and message.get("role") == "capability_result"
-            and message.get("capability") == "phone.use"
+            and message.get("capability") in PHONE_CAPABILITIES
             and isinstance(message.get("result"), dict)
             and message["result"].get("path") == path
         ):
